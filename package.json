@@ -1,0 +1,26 @@
+{
+  "name": "testbox",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Self-hosted pre-CI remote execution for trusted builds and tests.",
+  "packageManager": "pnpm@10.33.4",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter @testbox/shared --filter @testbox/worker --filter @testbox/api --filter @testbox/cli run build",
+    "typecheck": "pnpm -r --filter @testbox/shared --filter @testbox/worker --filter @testbox/api --filter @testbox/cli run typecheck",
+    "test": "bash scripts/ensure-redis.sh && pnpm -r --filter @testbox/shared --filter @testbox/worker --filter @testbox/api --filter @testbox/cli run test",
+    "lint": "eslint .",
+    "start:api": "node packages/api/dist/main.js",
+    "start:worker": "node packages/worker/dist/main.js"
+  },
+  "devDependencies": {
+    "eslint": "^9.14.0",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.14.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "@nestjs/core", "msgpackr-extract"]
+  }
+}
