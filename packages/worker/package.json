@@ -1,0 +1,23 @@
+{
+  "name": "@testbox/worker",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@testbox/shared": "workspace:*",
+    "bullmq": "^5.21.2",
+    "ioredis": "^5.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.10",
+    "typescript": "^5.6.3",
+    "vitest": "^3.0.0"
+  }
+}
