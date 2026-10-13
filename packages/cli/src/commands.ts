@@ -90,23 +90,33 @@ export class TestboxApp {
       const loaded = await loadRepoConfig(this.io.cwd);
       const user = await this.requireUser(flags.direct === true);
       const direct = flags.direct === true;
-      const sshHost = flags.sshHost || user?.sshHost || loaded.config.sshHost;
-      if (!sshHost) {
-        output.error('ssh host is required (testbox.yml sshHost, login, or --ssh-host)');
-        return ExitCode.JobFailed;
-      }
+      let sshHost = flags.sshHost || user?.sshHost || loaded.config.sshHost;
       const remoteRoot = user?.remoteRoot ?? '~/testbox';
       let id = 'local';
       let owner = 'local';
       let stagingRel = `workspaces/local/${loaded.config.project}`;
+      let workerId: string | undefined;
       if (!direct) {
         if (!user) return ExitCode.Auth;
         const created = await this.api(user).createWorkspace(loaded.config.project);
         id = created.id;
         owner = created.ownerId;
         stagingRel = created.stagingRel;
+        const selected = await this.api(user).selectWorker({
+          requires: [],
+          resources: 'light',
+          workspaceId: id,
+        });
+        if (selected?.sshHost) {
+          sshHost = selected.sshHost;
+          workerId = selected.id;
+        }
       }
-      const name = sessionName(loaded.config.project, owner);
+      if (!sshHost) {
+        output.error('ssh host is required (testbox.yml sshHost, login, or --ssh-host)');
+        return ExitCode.JobFailed;
+      }
+      const name = sessionName(loaded.config.project, workerId ? id : owner, workerId);
       const ssh = this.ssh(sshHost, user?.identityFile);
       await ssh.create({
         name,
@@ -123,6 +133,8 @@ export class TestboxApp {
         remoteRoot,
         direct,
         configDir: path.dirname(loaded.file),
+        workerId,
+        sessions: workerId ? { [workerId]: { sessionName: name, sshHost } } : undefined,
       };
       await writeWorkspaceState(path.dirname(loaded.file), state);
       output.summary({ jobId: id, state: 'started', exitCode: 0 });
@@ -144,10 +156,16 @@ export class TestboxApp {
       }
       const user = await readUserConfig(this.io.homeDir);
       const ssh = this.ssh(state.sshHost, user?.identityFile);
-      try {
-        await ssh.terminate(state.sessionName);
-      } catch (err) {
-        if (!(err instanceof SyncError)) throw err;
+      const names = new Set<string>([
+        state.sessionName,
+        ...Object.values(state.sessions ?? {}).map((session) => session.sessionName),
+      ]);
+      for (const name of names) {
+        try {
+          await ssh.terminate(name);
+        } catch (err) {
+          if (!(err instanceof SyncError)) throw err;
+        }
       }
       if (!state.direct && user) {
         try {
@@ -262,7 +280,25 @@ export class TestboxApp {
     try {
       const loaded = await loadRepoConfig(this.io.cwd);
       const user = await this.requireUser(flags.direct === true);
-      const state = await this.resolveState(loaded.file, loaded.config, flags, user);
+      let state = await this.resolveState(loaded.file, loaded.config, flags, user);
+      let targetWorkerId: string | undefined;
+      if (!flags.direct && user) {
+        const selected = await this.api(user).selectWorker({
+          requires: profile?.requires ?? [],
+          resources: profile?.resources ?? 'light',
+          workspaceId: state.id,
+        });
+        if (selected?.sshHost) {
+          state = await this.ensureWorkerSession(
+            state,
+            { id: selected.id, sshHost: selected.sshHost },
+            path.dirname(loaded.file),
+            loaded.config.ignore,
+            user.identityFile,
+          );
+          targetWorkerId = selected.id;
+        }
+      }
       const ssh = this.ssh(state.sshHost, user?.identityFile);
       await ssh.flush(state.sessionName);
       if (flags.direct) {
@@ -300,6 +336,7 @@ export class TestboxApp {
         requires: profile?.requires ?? [],
         priority: flags.priority ? Number(flags.priority) : 0,
         timeoutMs: this.timeoutMs(flags),
+        targetWorkerId,
       });
       output.event({ type: 'status', state: created.job.state, jobId: created.job.id });
       if (flags.detach) {
@@ -421,6 +458,50 @@ export class TestboxApp {
       error: terminal.error,
     });
     return exitCodeForJob(terminal.state as JobState);
+  }
+
+  /**
+   * One Mutagen session per worker. The session that is flushed is the worker
+   * the scheduler will pin the job to, so the snapshot and the run share a disk.
+   */
+  private async ensureWorkerSession(
+    state: WorkspaceState,
+    worker: { id: string; sshHost: string },
+    sourceDir: string,
+    ignore: string[],
+    identityFile?: string,
+  ): Promise<WorkspaceState> {
+    const sessions = { ...(state.sessions ?? {}) };
+    const existing = sessions[worker.id];
+    const ssh = this.ssh(worker.sshHost, identityFile);
+    if (existing && existing.sshHost === worker.sshHost) {
+      const next: WorkspaceState = {
+        ...state,
+        sshHost: worker.sshHost,
+        sessionName: existing.sessionName,
+        workerId: worker.id,
+        sessions,
+      };
+      await writeWorkspaceState(state.configDir, next);
+      return next;
+    }
+    const name = sessionName(state.project, state.id, worker.id);
+    await ssh.create({
+      name,
+      source: sourceDir,
+      destination: mutagenDestination(worker.sshHost, state.remoteRoot, state.stagingRel),
+      ignore,
+    });
+    sessions[worker.id] = { sessionName: name, sshHost: worker.sshHost };
+    const next: WorkspaceState = {
+      ...state,
+      sshHost: worker.sshHost,
+      sessionName: name,
+      workerId: worker.id,
+      sessions,
+    };
+    await writeWorkspaceState(state.configDir, next);
+    return next;
   }
 
   private async resolveState(

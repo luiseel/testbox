@@ -10,6 +10,8 @@ REDIS_URL="${REDIS_URL:-redis://127.0.0.1:6379}"
 API_URL="${TESTBOX_API_URL:-http://127.0.0.1:3000}"
 WORKER_ID="${TESTBOX_WORKER_ID:-$(hostname -s)-1}"
 WORKER_TOKEN="${TESTBOX_WORKER_TOKEN:-}"
+SSH_HOST="${TESTBOX_SSH_HOST:-testbox@$(hostname -s)}"
+CAPACITY="${TESTBOX_CAPACITY:-1}"
 TEMPLATE="$REPO/deploy/com.testbox.worker.plist.template"
 DEST="${HOME}/Library/LaunchAgents/com.testbox.worker.plist"
 
@@ -32,6 +34,8 @@ sed \
   -e "s|__WORKER_ID__|$WORKER_ID|g" \
   -e "s|__API_URL__|$API_URL|g" \
   -e "s|__WORKER_TOKEN__|$WORKER_TOKEN|g" \
+  -e "s|__SSH_HOST__|$SSH_HOST|g" \
+  -e "s|__CAPACITY__|$CAPACITY|g" \
   "$TEMPLATE" > "$DEST"
 
 launchctl bootout "gui/$(id -u)/com.testbox.worker" >/dev/null 2>&1 || true

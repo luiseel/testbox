@@ -83,6 +83,7 @@ function baseJob(prefix: string, patch: Partial<JobRecord> = {}): JobRecord {
     startedAt: null,
     endedAt: null,
     workerId: null,
+    targetWorkerId: null,
     attemptId: null,
     exitCode: null,
     error: null,

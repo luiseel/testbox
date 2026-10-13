@@ -30,7 +30,7 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
   let code = 0;
   const program = new Command();
   program.exitOverride();
-  program.name('testbox').description('Run builds and tests on a self-hosted Mac worker');
+  program.name('testbox').description('Run builds and tests on self-hosted macOS and Linux workers');
 
   const common = (command: Command) =>
     command

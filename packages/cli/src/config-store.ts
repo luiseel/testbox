@@ -10,6 +10,11 @@ export interface UserConfig {
   snapshotBin?: string;
 }
 
+export interface WorkerSession {
+  sessionName: string;
+  sshHost: string;
+}
+
 export interface WorkspaceState {
   id: string;
   project: string;
@@ -19,6 +24,9 @@ export interface WorkspaceState {
   remoteRoot: string;
   direct: boolean;
   configDir: string;
+  workerId?: string;
+  /** Per-worker Mutagen sessions. The snapshot is taken on the worker that will run the job. */
+  sessions?: Record<string, WorkerSession>;
 }
 
 export function userConfigPath(homeDir: string): string {

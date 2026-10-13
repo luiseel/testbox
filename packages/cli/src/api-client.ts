@@ -96,6 +96,7 @@ export class HttpApi {
     requires?: string[];
     priority?: number;
     timeoutMs?: number;
+    targetWorkerId?: string;
   }): Promise<{ job: JobPayload; superseded: string[] }> {
     return this.request('POST', '/v1/jobs', input);
   }
@@ -110,6 +111,24 @@ export class HttpApi {
 
   logs(id: string): Promise<{ lines: { stream: 'stdout' | 'stderr'; line: string; offset: number }[]; state: JobState }> {
     return this.request('GET', `/v1/jobs/${id}/logs`);
+  }
+
+  async selectWorker(input: {
+    requires: string[];
+    resources: 'light' | 'exclusive';
+    workspaceId?: string;
+  }): Promise<{ id: string; sshHost: string | null; labels: string[] } | null> {
+    const body = await this.request<{ worker?: { id?: string; sshHost?: string | null; labels?: string[] } }>(
+      'POST',
+      '/v1/workers/select',
+      input,
+    );
+    if (!body.worker?.id) return null;
+    return {
+      id: body.worker.id,
+      sshHost: body.worker.sshHost ?? null,
+      labels: body.worker.labels ?? [],
+    };
   }
 
   async listWorkers(): Promise<{ id: string; healthy: boolean; labels: string[] }[]> {

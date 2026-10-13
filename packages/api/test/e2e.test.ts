@@ -248,14 +248,129 @@ describe('queue and execution', () => {
     expect(await readFile(path.join(ctx.dataDir, 'cache', 'warm.txt'), 'utf8')).toBe('keep');
     await expect(readFile(path.join(ctx.dataDir, 'artifacts', 'job_aaaaaaaaaaaaaaaaaaaaaaaa', 'x.txt'), 'utf8')).rejects.toThrow();
   });
+
+  it('routes a job only to a worker whose labels satisfy the profile', async () => {
+    const ctx = await boot({ workerId: 'linux-1', labels: ['linux', 'x64', 'node'] });
+    open.push(ctx);
+    const mac = await extraDaemon(ctx, {
+      workerId: 'mac-1',
+      labels: ['macos', 'arm64', 'xcode', 'xcode-16.2', 'ios-simulator'],
+    });
+    const alice = await user(ctx, 'alice');
+    const ios = await submit(ctx, alice.token, {
+      command: 'true',
+      profile: 'ios',
+      resources: 'exclusive',
+      requires: ['macos', 'xcode'],
+    });
+    const unit = await submit(ctx, alice.token, {
+      command: 'true',
+      profile: 'unit',
+      requires: ['linux'],
+    });
+    expect(ios.status).toBe(201);
+    expect(unit.status).toBe(201);
+    await ctx.daemon?.startProcessing();
+    await mac.startProcessing();
+    const iosJob = await waitJob(ctx, alice.token, ios.json.job.id as string);
+    const unitJob = await waitJob(ctx, alice.token, unit.json.job.id as string);
+    expect(iosJob.state).toBe('succeeded');
+    expect(iosJob.workerId).toBe('mac-1');
+    expect(unitJob.state).toBe('succeeded');
+    expect(unitJob.workerId).toBe('linux-1');
+  });
+
+  it('rejects a job when no registered worker can ever satisfy its labels', async () => {
+    const ctx = await boot({ workerId: 'linux-1', labels: ['linux', 'x64', 'node'] });
+    open.push(ctx);
+    const alice = await user(ctx, 'alice');
+    const submitted = await submit(ctx, alice.token, {
+      command: 'true',
+      profile: 'ios',
+      requires: ['macos', 'xcode'],
+    });
+    expect(submitted.status).toBe(503);
+    expect(submitted.json.error.code).toBe('NO_WORKER');
+    const message = String(submitted.json.error.message);
+    expect(message).toContain('no registered worker can satisfy required labels: macos, xcode');
+    expect(message).toContain('linux-1');
+  });
+
+  it('prefers the worker that already ran the workspace when both are free', async () => {
+    const ctx = await boot({ workerId: 'warm', labels: ['linux', 'node', 'warm-cache'] });
+    open.push(ctx);
+    const cold = await extraDaemon(ctx, { workerId: 'cold', labels: ['linux', 'node'] });
+    const alice = await user(ctx, 'alice');
+    const ws = await call(ctx, alice.token, 'POST', '/v1/workspaces', { project: 'affinity' });
+    const workspace = { id: ws.json.id as string, stagingRel: ws.json.stagingRel as string };
+    await ctx.daemon?.startProcessing();
+    await cold.startProcessing();
+    const first = await submit(ctx, alice.token, {
+      command: 'true',
+      profile: 'unit',
+      requires: ['warm-cache'],
+      workspace,
+    });
+    const firstJob = await waitJob(ctx, alice.token, first.json.job.id as string);
+    const second = await submit(ctx, alice.token, {
+      command: 'true',
+      profile: 'again',
+      requires: ['linux'],
+      workspace,
+    });
+    const secondJob = await waitJob(ctx, alice.token, second.json.job.id as string);
+    expect(firstJob.workerId).toBe('warm');
+    expect(secondJob.state).toBe('succeeded');
+    expect(secondJob.workerId).toBe('warm');
+  });
+
+  it('does not rerun a job after its worker is lost while another worker is healthy', async () => {
+    const ctx = await boot({
+      leaseMs: 700,
+      sweeperMs: 100,
+      workerId: 'worker-a',
+      labels: ['linux', 'pool-a'],
+    });
+    open.push(ctx);
+    const other = await extraDaemon(ctx, {
+      workerId: 'worker-b',
+      labels: ['linux', 'pool-b'],
+      leaseMs: 700,
+    });
+    const alice = await user(ctx, 'alice');
+    const marker = path.join(ctx.dataDir, 'loss-multi.txt');
+    const created = await submit(ctx, alice.token, {
+      command: `echo RAN >> ${shellQuote(marker)}; sleep 30`,
+      profile: 'loss',
+      requires: ['pool-a'],
+    });
+    await ctx.daemon?.startProcessing();
+    await other.startProcessing();
+    await waitFor(async () => (await readFile(marker, 'utf8').catch(() => '')).includes('RAN'));
+    ctx.daemon?.simulateCrash();
+    const timedOut = await waitJob(ctx, alice.token, created.json.job.id as string);
+    expect(timedOut.state).toBe('timed_out');
+    expect(timedOut.error).toBe('lease_expired');
+    expect(timedOut.workerId).toBe('worker-a');
+    const pgid = timedOut.pgid as number;
+    await ctx.daemon?.reapOrphans();
+    if (pgid) await waitFor(() => !alive(pgid));
+    const next = await submit(ctx, alice.token, { command: 'true', profile: 'after', requires: ['pool-b'] });
+    const nextJob = await waitJob(ctx, alice.token, next.json.job.id as string);
+    expect(nextJob.state).toBe('succeeded');
+    expect(nextJob.workerId).toBe('worker-b');
+    expect(await readFile(marker, 'utf8')).toBe('RAN\n');
+  });
 });
 
 interface Ctx {
   app: INestApplication;
   base: string;
   dataDir: string;
+  prefix: string;
   daemon: Daemon | null;
   admin: string;
+  leaseMs: number;
   close: () => Promise<void>;
 }
 
@@ -264,6 +379,9 @@ async function boot(opts?: {
   leaseMs?: number;
   sweeperMs?: number;
   simulator?: { reset: () => Promise<void> };
+  workerId?: string;
+  labels?: string[];
+  capacity?: number;
 }): Promise<Ctx> {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), 'tb-e2e-'));
   const prefix = `e2e_${Math.random().toString(16).slice(2)}`;
@@ -289,8 +407,9 @@ async function boot(opts?: {
           redisUrl,
           keyPrefix: prefix,
           dataDir,
-          workerId: `worker-${prefix}`,
-          labels: ['linux', 'node'],
+          workerId: opts?.workerId ?? `worker-${prefix}`,
+          labels: opts?.labels ?? ['linux', 'node'],
+          capacity: opts?.capacity,
           leaseMs: opts?.leaseMs ?? 15_000,
           heartbeatMs: 200,
           graceMs: 200,
@@ -303,7 +422,9 @@ async function boot(opts?: {
     app,
     base,
     dataDir,
+    prefix,
     daemon,
+    leaseMs: opts?.leaseMs ?? 15_000,
     admin: 'bootstrap-token-admin-123',
     close: async () => {
       if (daemon) await daemon.stop();
@@ -345,6 +466,7 @@ async function submit(
     profile?: string;
     priority?: number;
     resources?: 'light' | 'exclusive';
+    requires?: string[];
     mutateSnapshot?: boolean;
     workspace?: { id: string; stagingRel: string };
   },
@@ -377,8 +499,35 @@ async function submit(
     profile: opts.profile ?? null,
     priority: opts.priority ?? 0,
     resources: opts.resources ?? 'light',
+    requires: opts.requires,
     timeoutMs: 20_000,
   });
+}
+
+async function extraDaemon(
+  ctx: Ctx,
+  opts: { workerId: string; labels: string[]; capacity?: number; leaseMs?: number },
+): Promise<Daemon> {
+  const daemon = await startDaemon({
+    redisUrl,
+    keyPrefix: ctx.prefix,
+    dataDir: ctx.dataDir,
+    workerId: opts.workerId,
+    labels: opts.labels,
+    capacity: opts.capacity,
+    leaseMs: opts.leaseMs ?? ctx.leaseMs,
+    heartbeatMs: 200,
+    graceMs: 200,
+    apiUrl: ctx.base,
+    workerToken: 'worker-token-secret-123',
+    processImmediately: false,
+  });
+  const prev = ctx.close;
+  ctx.close = async () => {
+    await daemon.stop();
+    await prev();
+  };
+  return daemon;
 }
 
 async function waitJob(ctx: Ctx, token: string, id: string): Promise<JobRecord> {

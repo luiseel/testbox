@@ -16,6 +16,7 @@ import {
   matchGlob,
   needsDependencyRefresh,
   parseTestboxConfig,
+  parseWorkerConfig,
   quoteShellArg,
   redact,
   remoteBash,
@@ -113,6 +114,30 @@ profiles:
     expect(config.profiles.unit.resources).toBe('light');
     expect(config.profiles.ios.resources).toBe('exclusive');
     expect(config.profiles.ios.requires).toEqual(['ios-simulator']);
+    const aliased = parseTestboxConfig(`
+project: demo
+profiles:
+  unit:
+    command: pnpm test
+  ios:
+    command: xcodebuild test
+    requires: [macos, xcode]
+`);
+    expect(aliased.profiles.unit.cmd).toBe('pnpm test');
+    expect(aliased.profiles.unit.requires).toEqual([]);
+    expect(aliased.profiles.ios.requires).toEqual(['macos', 'xcode']);
+  });
+
+  it('parses worker capacity, ssh host, and extra labels', () => {
+    const config = parseWorkerConfig(`
+capacity: 2
+sshHost: testbox@builder-1
+labels:
+  - gpu
+`);
+    expect(config.capacity).toBe(2);
+    expect(config.sshHost).toBe('testbox@builder-1');
+    expect(config.labels).toEqual(['gpu']);
   });
 });
 

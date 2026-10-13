@@ -1,17 +1,14 @@
 import { mkdir, appendFile } from 'fs/promises';
 import path from 'path';
-import { Worker } from 'bullmq';
 import IORedis from 'ioredis';
 import {
-  bullConnection,
-  bullPrefix,
+  claimNextJob,
   DEFAULT_RETENTION_MS,
   directoryDigest,
   ensureDependencies,
   fingerprintFromDirectory,
   isTerminal,
   JobStore,
-  QUEUE_NAME,
   resolveInside,
   writeRetention,
   type JobEvent,
@@ -32,8 +29,12 @@ export interface DaemonOptions {
   workerId: string;
   labels: string[];
   hostname?: string;
+  capacity?: number;
+  sshHost?: string | null;
   leaseMs?: number;
   heartbeatMs?: number;
+  heartbeatTtlMs?: number;
+  pollMs?: number;
   graceMs?: number;
   retentionMs?: number;
   apiUrl?: string;
@@ -48,11 +49,16 @@ export class Daemon {
   readonly store: JobStore;
   private readonly redis: IORedis;
   private sub: IORedis | null = null;
-  private bull: Worker | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
-  private stopRenewal: (() => void) | null = null;
-  private currentAbort: AbortController | null = null;
-  private currentJobId: string | null = null;
+  private processing = false;
+  private stopping = false;
+  private pumpPromise: Promise<void> | null = null;
+  private wake: (() => void) | null = null;
+  private inflight = 0;
+  private exclusiveHeld = false;
+  private readonly aborts = new Map<string, AbortController>();
+  private readonly renewals = new Map<string, () => void>();
+  private readonly running = new Set<Promise<void>>();
   private readonly simulator: SimulatorControl;
   private readonly env: NodeJS.ProcessEnv;
 
@@ -65,6 +71,14 @@ export class Daemon {
 
   get leaseMs(): number {
     return this.opts.leaseMs ?? 30_000;
+  }
+
+  get capacity(): number {
+    return Math.max(1, this.opts.capacity ?? 1);
+  }
+
+  get heartbeatTtlMs(): number {
+    return this.opts.heartbeatTtlMs ?? 15_000;
   }
 
   async ready(): Promise<void> {
@@ -84,31 +98,15 @@ export class Daemon {
   }
 
   async startProcessing(): Promise<void> {
-    if (this.bull) return;
-    this.bull = new Worker(
-      QUEUE_NAME,
-      async (bullJob) => {
-        const data = bullJob.data as { jobId?: string };
-        if (!data.jobId) return;
-        await this.handleJob(data.jobId);
-      },
-      {
-        connection: bullConnection(this.opts.redisUrl),
-        prefix: bullPrefix(this.opts.keyPrefix),
-        concurrency: 1,
-        lockDuration: 60_000,
-        stalledInterval: 30_000,
-        maxStalledCount: 0,
-      },
-    );
-    this.bull.on('error', () => undefined);
-    await this.bull.waitUntilReady();
+    if (this.processing) return;
+    this.processing = true;
+    this.pumpPromise = this.pump();
   }
 
   /** Stop lease renewal without completing the job, as if this process crashed. */
   simulateCrash(): void {
-    this.stopRenewal?.();
-    this.stopRenewal = null;
+    for (const stop of this.renewals.values()) stop();
+    this.renewals.clear();
   }
 
   async reapOrphans(): Promise<void> {
@@ -126,10 +124,16 @@ export class Daemon {
     }
   }
 
+  /**
+   * Run one queued job if this worker is allowed to claim it.
+   * The pump is the normal path; this remains for a direct re-entry after a terminal state.
+   */
   async handleJob(jobId: string): Promise<void> {
     const existing = await this.store.getJob(jobId);
     if (!existing || existing.state !== 'queued') return;
-
+    const worker = await this.store.getWorker(this.opts.workerId);
+    if (worker && existing.requires.some((label) => !worker.labels.includes(label))) return;
+    if (existing.targetWorkerId && existing.targetWorkerId !== this.opts.workerId) return;
     const now = Date.now();
     const claimed = await this.store.transition(jobId, ['queued'], 'assigned', {
       workerId: this.opts.workerId,
@@ -138,14 +142,87 @@ export class Daemon {
       leaseExpiresAt: now + this.leaseMs,
     });
     if (!claimed.ok) return;
+    await this.store.setWorkspaceAffinity(existing.workspaceId, this.opts.workerId);
+    await this.runAssigned(jobId);
+  }
 
+  async stop(): Promise<void> {
+    this.stopping = true;
+    this.processing = false;
+    this.wake?.();
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    for (const stopRenew of this.renewals.values()) stopRenew();
+    this.renewals.clear();
+    for (const abort of this.aborts.values()) abort.abort('shutdown');
+    if (this.pumpPromise) await this.pumpPromise;
+    await Promise.allSettled([...this.running]);
+    if (this.sub) await this.sub.quit();
+    this.sub = null;
+    await this.redis.quit();
+  }
+
+  private async pump(): Promise<void> {
+    while (this.processing) {
+      let claimed = false;
+      try {
+        while (this.processing && this.inflight < this.capacity && !this.exclusiveHeld) {
+          const job = await claimNextJob(
+            this.store,
+            this.opts.workerId,
+            Date.now(),
+            this.heartbeatTtlMs,
+            this.leaseMs,
+          );
+          if (!job) break;
+          claimed = true;
+          this.launch(job);
+          if (job.resources === 'exclusive') break;
+        }
+      } catch {
+        claimed = false;
+      }
+      if (!this.processing) break;
+      if (!claimed) await this.sleep(this.opts.pollMs ?? 80);
+    }
+  }
+
+  private launch(job: JobRecord): void {
+    if (job.resources === 'exclusive') this.exclusiveHeld = true;
+    this.inflight += 1;
+    const run = this.runAssigned(job.id).finally(() => {
+      this.inflight -= 1;
+      if (job.resources === 'exclusive') this.exclusiveHeld = false;
+      this.wake?.();
+    });
+    this.running.add(run);
+    void run.finally(() => {
+      this.running.delete(run);
+    });
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.wake = null;
+        resolve();
+      }, ms);
+      this.wake = () => {
+        clearTimeout(timer);
+        this.wake = null;
+        resolve();
+      };
+    });
+  }
+
+  private async runAssigned(jobId: string): Promise<void> {
     const abort = new AbortController();
-    this.currentAbort = abort;
-    this.currentJobId = jobId;
+    this.aborts.set(jobId, abort);
+    if (this.stopping) abort.abort('shutdown');
     const renew = setInterval(() => {
       void this.renew(jobId, abort);
     }, Math.max(50, Math.floor(this.leaseMs / 3)));
-    this.stopRenewal = () => clearInterval(renew);
+    const stopRenew = () => clearInterval(renew);
+    this.renewals.set(jobId, stopRenew);
 
     try {
       const job = await this.requireJob(jobId);
@@ -195,23 +272,10 @@ export class Daemon {
         error: message,
       });
     } finally {
-      clearInterval(renew);
-      if (this.stopRenewal) this.stopRenewal = null;
-      if (this.currentJobId === jobId) {
-        this.currentJobId = null;
-        this.currentAbort = null;
-      }
+      stopRenew();
+      this.renewals.delete(jobId);
+      this.aborts.delete(jobId);
     }
-  }
-
-  async stop(): Promise<void> {
-    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
-    this.stopRenewal?.();
-    this.currentAbort?.abort('shutdown');
-    if (this.bull) await this.bull.close();
-    if (this.sub) await this.sub.quit();
-    this.sub = null;
-    await this.redis.quit();
   }
 
   private async prepare(job: JobRecord): Promise<void> {
@@ -241,7 +305,7 @@ export class Daemon {
       fingerprint,
       install,
     });
-    if (job.resources === 'exclusive') {
+    if (job.resources === 'exclusive' && this.simulator.enabled !== false) {
       await this.simulator.reset();
       await this.noteLog(job.id, 'stderr', 'reset simulators for exclusive job');
     }
@@ -287,8 +351,9 @@ export class Daemon {
       os: process.platform,
       arch: process.arch,
       labels: this.opts.labels,
-      capacity: 1,
+      capacity: this.capacity,
       lastSeen: Date.now(),
+      sshHost: this.opts.sshHost ?? null,
     });
   }
 
@@ -302,8 +367,11 @@ export class Daemon {
       } catch {
         return;
       }
-      if (event.type === 'cancel' && event.jobId === this.currentJobId) {
-        this.currentAbort?.abort('cancel');
+      if (event.type === 'cancel') {
+        this.aborts.get(event.jobId)?.abort('cancel');
+      }
+      if (event.type === 'state' && event.state === 'queued') {
+        this.wake?.();
       }
     });
   }
