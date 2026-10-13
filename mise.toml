@@ -1,0 +1,9 @@
+# Exact tool versions for this repo, its CI, and the testbox workers.
+# `mise.lock` holds checksums. Bump with `mise lock --bump`.
+[tools]
+node = "22.23.3"
+pnpm = "10.33.4"
+
+[settings]
+lockfile = true
+lockfile_platforms = ["linux-x64", "linux-arm64", "macos-arm64"]

@@ -5,7 +5,7 @@
   "description": "Self-hosted pre-CI remote execution for trusted builds and tests.",
   "packageManager": "pnpm@10.33.4",
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
   },
   "scripts": {
     "build": "tsc -b",
