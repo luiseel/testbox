@@ -231,6 +231,104 @@ describe('cli', () => {
     await rm(home, { recursive: true, force: true });
     await rm(project, { recursive: true, force: true });
   });
+
+  it('syncs to the selected worker and exits 11 when no worker can run the profile', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
+    const project = await mkdtemp(path.join(os.tmpdir(), 'tb-proj-'));
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const calls: { file: string; args: string[] }[] = [];
+    const { mkdir, writeFile: write } = await import('fs/promises');
+    await mkdir(path.join(home, '.config', 'testbox'), { recursive: true });
+    await write(
+      path.join(home, '.config', 'testbox', 'config.json'),
+      JSON.stringify({
+        apiUrl: 'http://api.test',
+        token: 'user-token-123456',
+        sshHost: 'testbox',
+        remoteRoot: '~/testbox',
+        snapshotBin: 'testbox/app/packages/worker/dist/snapshot-cli.js',
+      }),
+    );
+    await write(
+      path.join(project, 'testbox.yml'),
+      'project: demo\nprofiles:\n  ios:\n    cmd: xcodebuild test\n    resources: exclusive\n    requires: [macos, xcode]\n',
+    );
+    await mkdir(path.join(project, '.testbox'), { recursive: true });
+    await write(
+      path.join(project, '.testbox', 'workspace.json'),
+      JSON.stringify({
+        id: 'ws_123',
+        project: 'demo',
+        sessionName: 'testbox-demo-usr_abc',
+        stagingRel: 'workspaces/usr_abc/demo',
+        sshHost: 'testbox',
+        remoteRoot: '~/testbox',
+        direct: false,
+        configDir: project,
+      }),
+    );
+    let pinned = '';
+    const remote: RemoteRunner = {
+      async run(file, args) {
+        calls.push({ file, args });
+        if (file === 'ssh') {
+          return { code: 0, stdout: `${JSON.stringify({ digest: 'ab'.repeat(32), relPath: 'snapshots/snap' })}\n`, stderr: '' };
+        }
+        return { code: 0, stdout: '', stderr: '' };
+      },
+    };
+    const synced = await runCli(['verify', 'ios'], {
+      ...io(home, project, remote, stdout, stderr),
+      fetchImpl: async (input, init) => {
+        const url = String(input);
+        const body = init?.body ? (JSON.parse(String(init.body)) as { targetWorkerId?: string }) : {};
+        if (url.endsWith('/workers/select')) {
+          return new Response(JSON.stringify({ worker: { id: 'mac-1', sshHost: 'testbox@mac-1', labels: ['macos', 'xcode'] } }), { status: 201 });
+        }
+        if (url.endsWith('/snapshots')) {
+          return new Response(JSON.stringify({ id: 'snap', digest: 'ab'.repeat(32) }), { status: 201 });
+        }
+        if (url.endsWith('/jobs') && init?.method === 'POST') {
+          pinned = body.targetWorkerId ?? '';
+          return new Response(JSON.stringify({ job: { id: 'job_123', state: 'queued', exitCode: null, error: null }, superseded: [] }), { status: 201 });
+        }
+        if (url.endsWith('/events')) {
+          const stream = new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('event: done\ndata: {"state":"succeeded","exitCode":0,"error":null}\n\n'));
+              controller.close();
+            },
+          });
+          return new Response(stream, { status: 200 });
+        }
+        return new Response('{}', { status: 200 });
+      },
+    });
+    expect(synced).toBe(0);
+    expect(pinned).toBe('mac-1');
+    const created = calls.find((call) => call.file === 'mutagen' && call.args.includes('create'));
+    expect(created?.args.at(-1)).toBe('testbox@mac-1:~/testbox/workspaces/usr_abc/demo');
+    calls.length = 0;
+    stderr.length = 0;
+    const missing = await runCli(['verify', 'ios'], {
+      ...io(home, project, remote, stdout, stderr),
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              code: 'NO_WORKER',
+              message: 'no registered worker can satisfy required labels: macos, xcode; registered: linux-1 [linux, x64]',
+            },
+          }),
+          { status: 503 },
+        ),
+    });
+    expect(missing).toBe(11);
+    expect(stderr.join('')).toContain('no registered worker can satisfy required labels: macos, xcode');
+    await rm(home, { recursive: true, force: true });
+    await rm(project, { recursive: true, force: true });
+  });
 });
 
 function io(

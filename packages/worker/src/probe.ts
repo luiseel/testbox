@@ -6,6 +6,7 @@ const execFileAsync = promisify(execFile);
 
 export async function probeRuntime(): Promise<RuntimeFacts> {
   let xcodeVersion: string | null = null;
+  // Xcode exists only on macOS. Skipping the spawn keeps Linux fingerprints stable.
   if (process.platform === 'darwin') {
     try {
       const { stdout } = await execFileAsync('xcodebuild', ['-version']);

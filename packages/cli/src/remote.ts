@@ -156,9 +156,9 @@ export class MutagenSsh {
   }
 }
 
-/** Constant probe script. Xcode is included when `xcodebuild` exists. */
+/** Constant probe script. Xcode is probed only on darwin. */
 export function runtimeProbeScript(): string {
-  return 'node -e "let x=null;try{x=require(\\"child_process\\").execSync(\\"xcodebuild -version\\",{encoding:\\"utf8\\"}).split(\\"\\\\n\\")[0]}catch(e){}process.stdout.write(JSON.stringify({nodeVersion:process.version,arch:process.arch,platform:process.platform,xcodeVersion:x}))"';
+  return 'node -e "let x=null;if(process.platform===\\"darwin\\"){try{x=require(\\"child_process\\").execSync(\\"xcodebuild -version\\",{encoding:\\"utf8\\"}).split(\\"\\\\n\\")[0]}catch(e){}}process.stdout.write(JSON.stringify({nodeVersion:process.version,arch:process.arch,platform:process.platform,xcodeVersion:x}))"';
 }
 
 export function mutagenDestination(sshHost: string, remoteRoot: string, stagingRel: string): string {

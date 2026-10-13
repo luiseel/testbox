@@ -23,8 +23,10 @@
     <string>__API_URL__</string>
     <key>TESTBOX_WORKER_TOKEN</key>
     <string>__WORKER_TOKEN__</string>
-    <key>TESTBOX_LABELS</key>
-    <string>macos,arm64,xcode,ios-simulator,node,pnpm,playwright</string>
+    <key>TESTBOX_SSH_HOST</key>
+    <string>__SSH_HOST__</string>
+    <key>TESTBOX_CAPACITY</key>
+    <string>__CAPACITY__</string>
     <key>PATH</key>
     <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>

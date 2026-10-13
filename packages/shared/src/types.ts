@@ -24,6 +24,8 @@ export interface WorkerRecord {
   labels: string[];
   capacity: number;
   lastSeen: number;
+  /** SSH destination for Mutagen, for example `testbox@builder-1`. */
+  sshHost: string | null;
 }
 
 export interface WorkspaceRecord {
@@ -63,6 +65,8 @@ export interface JobRecord {
   startedAt: number | null;
   endedAt: number | null;
   workerId: string | null;
+  /** When set, only this worker may run the job (the snapshot lives on its disk). */
+  targetWorkerId: string | null;
   attemptId: string | null;
   exitCode: number | null;
   error: string | null;

@@ -1,6 +1,8 @@
-# Machine setup
+# macOS machine setup
 
-One Apple Silicon Mac, one dedicated `testbox` account, one worker. The daemon is a LaunchAgent so Xcode and the iOS Simulator run inside a logged-in GUI session. Concurrency is 1. Jobs labeled `exclusive` (the default for anything that looks like Xcode or Playwright) take the machine alone, and the worker shuts simulators down between those jobs.
+One Apple Silicon Mac, one dedicated `testbox` account. For a Linux worker see [machine-setup-linux.md](machine-setup-linux.md). A fleet can register both. The scheduler sends each job to a healthy worker whose labels cover the profile.
+
+The macOS daemon is a LaunchAgent so Xcode and the iOS Simulator run inside a logged-in GUI session. Concurrency defaults to 1. Jobs labeled `exclusive` take the machine alone, and the worker shuts simulators down between those jobs. Linux workers skip that reset.
 
 ## Account
 

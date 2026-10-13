@@ -91,6 +91,7 @@ function encodeJob(job: JobRecord): Record<string, string> {
     startedAt: job.startedAt === null ? '' : String(job.startedAt),
     endedAt: job.endedAt === null ? '' : String(job.endedAt),
     workerId: job.workerId ?? '',
+    targetWorkerId: job.targetWorkerId ?? '',
     attemptId: job.attemptId ?? '',
     exitCode: job.exitCode === null ? '' : String(job.exitCode),
     error: job.error ?? '',
@@ -124,6 +125,7 @@ function decodeJob(raw: Record<string, string>): JobRecord | null {
     startedAt: num(raw.startedAt),
     endedAt: num(raw.endedAt),
     workerId: raw.workerId || null,
+    targetWorkerId: raw.targetWorkerId || null,
     attemptId: raw.attemptId || null,
     exitCode: num(raw.exitCode),
     error: raw.error || null,
@@ -427,8 +429,22 @@ export class JobStore {
       labels: JSON.stringify(worker.labels),
       capacity: String(worker.capacity),
       lastSeen: String(worker.lastSeen),
+      sshHost: worker.sshHost ?? '',
     });
     await this.redis.sadd(this.k('workers'), worker.id);
+  }
+
+  async getWorker(id: string): Promise<WorkerRecord | null> {
+    const workers = await this.listWorkers();
+    return workers.find((worker) => worker.id === id) ?? null;
+  }
+
+  async setWorkspaceAffinity(workspaceId: string, workerId: string): Promise<void> {
+    await this.redis.set(this.k(`affinity:${workspaceId}`), workerId);
+  }
+
+  async getWorkspaceAffinity(workspaceId: string): Promise<string | null> {
+    return this.redis.get(this.k(`affinity:${workspaceId}`));
   }
 
   async listWorkers(): Promise<WorkerRecord[]> {
@@ -445,6 +461,7 @@ export class JobStore {
         labels: JSON.parse(raw.labels || '[]') as string[],
         capacity: Number(raw.capacity || 1),
         lastSeen: Number(raw.lastSeen || 0),
+        sshHost: raw.sshHost || null,
       });
     }
     return workers;

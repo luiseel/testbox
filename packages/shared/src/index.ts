@@ -15,3 +15,5 @@ export * from './mutagen';
 export * from './types';
 export * from './queue';
 export * from './job-store';
+export * from './schedule';
+export * from './worker-config';

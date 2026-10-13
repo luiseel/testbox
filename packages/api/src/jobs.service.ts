@@ -2,19 +2,24 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { Queue } from 'bullmq';
 import {
   AppError,
+  chooseSyncTarget,
   createId,
+  explainUnsatisfiable,
   hashContent,
   isTerminal,
   JobStore,
+  labelsSatisfy,
   queueKeyFor,
   snapshotRel,
   stableStringify,
   stagingRel,
-  toBullPriority,
+  toPlacementWorkers,
   type JobRecord,
   type LogLine,
   type Principal,
+  type ResourceClass,
   type SnapshotRecord,
+  type WorkerRecord,
   type WorkspaceRecord,
 } from '@testbox/shared';
 import { APP_OPTIONS, JOB_QUEUE, JOB_STORE, type AppOptions } from './options';
@@ -30,6 +35,7 @@ export interface CreateJobInput {
   priority?: number;
   timeoutMs?: number;
   idempotencyKey?: string;
+  targetWorkerId?: string | null;
 }
 
 @Injectable()
@@ -100,10 +106,7 @@ export class JobsService {
       throw new AppError('NOT_FOUND', 'snapshot not found', 404);
     }
     const requires = input.requires ?? [];
-    const workers = await this.healthyWorkers(requires);
-    if (workers.length === 0) {
-      throw new AppError('NO_WORKER', 'no compatible worker is heartbeating', 503);
-    }
+    await this.assertRunnable(requires, input.targetWorkerId ?? null);
     const profile = input.profile ?? null;
     const body = {
       workspaceId: workspace.id,
@@ -115,6 +118,7 @@ export class JobsService {
       requires,
       priority: input.priority ?? 0,
       timeoutMs: input.timeoutMs ?? 30 * 60 * 1000,
+      targetWorkerId: input.targetWorkerId ?? null,
     };
     const requestHash = hashContent(stableStringify(body));
     if (input.idempotencyKey) {
@@ -175,8 +179,51 @@ export class JobsService {
     return workers.filter(
       (worker) =>
         now - worker.lastSeen <= this.options.heartbeatTtlMs &&
-        requires.every((label) => worker.labels.includes(label)),
+        labelsSatisfy(worker.labels, requires),
     );
+  }
+
+  /** Where Mutagen should sync. Prefers the workspace's warm worker. */
+  async selectWorker(input: {
+    requires?: string[];
+    resources?: ResourceClass;
+    workspaceId?: string | null;
+  }): Promise<WorkerRecord> {
+    const requires = input.requires ?? [];
+    const workers = await this.store.listWorkers();
+    const impossible = explainUnsatisfiable(requires, workers);
+    if (impossible) throw new AppError('NO_WORKER', impossible, 503);
+    const now = Date.now();
+    const active = (await this.store.listAllJobs()).filter(
+      (job) => job.state === 'assigned' || job.state === 'running',
+    );
+    const affinity = input.workspaceId ? await this.store.getWorkspaceAffinity(input.workspaceId) : null;
+    const chosen = chooseSyncTarget(
+      { requires, resources: input.resources ?? 'light' },
+      toPlacementWorkers(workers, active),
+      affinity,
+      now,
+      this.options.heartbeatTtlMs,
+    );
+    const record = chosen ? workers.find((worker) => worker.id === chosen.id) : undefined;
+    if (!record) throw new AppError('NO_WORKER', 'no compatible worker is heartbeating', 503);
+    return record;
+  }
+
+  private async assertRunnable(requires: string[], targetWorkerId: string | null): Promise<void> {
+    const workers = await this.store.listWorkers();
+    const impossible = explainUnsatisfiable(requires, workers);
+    if (impossible) throw new AppError('NO_WORKER', impossible, 503);
+    if (!targetWorkerId) return;
+    const target = workers.find((worker) => worker.id === targetWorkerId);
+    if (!target || !labelsSatisfy(target.labels, requires)) {
+      const need = requires.length > 0 ? requires.join(', ') : '(any worker)';
+      throw new AppError(
+        'NO_WORKER',
+        `worker ${targetWorkerId} cannot satisfy required labels: ${need}`,
+        503,
+      );
+    }
   }
 
   private async enqueue(
@@ -189,6 +236,7 @@ export class JobsService {
       resources: 'light' | 'exclusive';
       artifactGlobs: string[];
       requires: string[];
+      targetWorkerId: string | null;
       priority: number;
       timeoutMs: number;
       workspaceId: string;
@@ -208,6 +256,7 @@ export class JobsService {
       resources: body.resources,
       artifactGlobs: body.artifactGlobs,
       requires: body.requires,
+      targetWorkerId: body.targetWorkerId,
       priority: body.priority,
       timeoutMs: body.timeoutMs,
       state: 'queued',
@@ -232,25 +281,6 @@ export class JobsService {
       } catch {
         // the worker may already have claimed it; the state machine blocks re-execution
       }
-    }
-    try {
-      await this.queue.add(
-        'run',
-        { jobId: job.id },
-        {
-          jobId: job.id,
-          attempts: 1,
-          priority: toBullPriority(job.priority),
-          removeOnComplete: { age: 7 * 24 * 3600 },
-          removeOnFail: { age: 7 * 24 * 3600 },
-        },
-      );
-    } catch (err) {
-      await this.store.transition(job.id, ['queued'], 'failed', {
-        endedAt: Date.now(),
-        error: 'enqueue_failed',
-      });
-      throw err;
     }
     await this.store.audit({ at: now, actorId: ownerId, action: 'job.create', subject: job.id });
     return created;

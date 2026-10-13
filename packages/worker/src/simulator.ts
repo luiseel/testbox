@@ -3,9 +3,13 @@ import { buildJobEnv } from './env';
 
 export interface SimulatorControl {
   reset(): Promise<void>;
+  /** False on platforms without a simulator. Omitted means the reset should run. */
+  enabled?: boolean;
 }
 
 export class MacOSSimulatorControl implements SimulatorControl {
+  readonly enabled = true;
+
   async reset(): Promise<void> {
     await runBestEffort(['xcrun', 'simctl', 'shutdown', 'all']);
     const erase = await runBestEffort(['xcrun', 'simctl', 'erase', 'all']);
@@ -28,5 +32,10 @@ async function runBestEffort(argv: string[]): Promise<number> {
 
 export function simulatorForPlatform(platform: NodeJS.Platform = process.platform): SimulatorControl {
   if (platform === 'darwin') return new MacOSSimulatorControl();
-  return { async reset() {} };
+  return {
+    enabled: false,
+    async reset() {
+      // Linux workers have no iOS Simulator. Exclusive jobs still take the machine alone.
+    },
+  };
 }

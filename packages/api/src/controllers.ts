@@ -43,6 +43,7 @@ function publicJob(job: JobRecord): Omit<JobRecord, 'queueKey'> {
     startedAt: job.startedAt,
     endedAt: job.endedAt,
     workerId: job.workerId,
+    targetWorkerId: job.targetWorkerId,
     attemptId: job.attemptId,
     exitCode: job.exitCode,
     error: job.error,
@@ -153,6 +154,7 @@ export class JobsController {
         resources: z.enum(['light', 'exclusive']).optional(),
         artifactGlobs: z.array(z.string()).optional(),
         requires: z.array(z.string()).optional(),
+        targetWorkerId: z.string().min(1).max(200).nullable().optional(),
         priority: z.number().int().min(0).max(999).optional(),
         timeoutMs: z.number().int().min(1000).max(24 * 60 * 60 * 1000).optional(),
         idempotencyKey: z.string().min(8).max(200).optional(),
@@ -284,7 +286,30 @@ export class JobsController {
 
 @Controller('workers')
 export class WorkersController {
-  constructor(@Inject(JOB_STORE) private readonly store: JobStore, @Inject(APP_OPTIONS) private readonly options: AppOptions) {}
+  constructor(
+    @Inject(JOB_STORE) private readonly store: JobStore,
+    @Inject(APP_OPTIONS) private readonly options: AppOptions,
+    @Inject(JobsService) private readonly jobs: JobsService,
+  ) {}
+
+  @Post('select')
+  async select(@Body() body: unknown) {
+    const input = parse(
+      z.object({
+        requires: z.array(z.string()).optional(),
+        resources: z.enum(['light', 'exclusive']).optional(),
+        workspaceId: z.string().min(1).nullable().optional(),
+      }),
+      body,
+    );
+    const worker = await this.jobs.selectWorker(input);
+    return {
+      worker: {
+        ...worker,
+        healthy: Date.now() - worker.lastSeen <= this.options.heartbeatTtlMs,
+      },
+    };
+  }
 
   @Get()
   async list() {

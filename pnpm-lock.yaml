@@ -107,9 +107,6 @@ importers:
       '@testbox/shared':
         specifier: workspace:*
         version: link:../shared
-      bullmq:
-        specifier: ^5.21.2
-        version: 5.81.5
       ioredis:
         specifier: ^5.8.1
         version: 5.11.1

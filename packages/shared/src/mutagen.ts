@@ -10,8 +10,10 @@ function assertIgnore(pattern: string): void {
   }
 }
 
-export function sessionName(project: string, userId: string): string {
-  const raw = `testbox-${project}-${userId}`.replace(/[^A-Za-z0-9._-]+/g, '-');
+export function sessionName(project: string, userId: string, workerId?: string): string {
+  const parts = [project, userId];
+  if (workerId) parts.push(workerId);
+  const raw = `testbox-${parts.join('-')}`.replace(/[^A-Za-z0-9._-]+/g, '-');
   const name = raw.slice(0, 80);
   assertSessionName(name);
   return name;
