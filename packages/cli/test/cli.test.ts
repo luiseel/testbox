@@ -181,7 +181,7 @@ describe('cli', () => {
       JSON.stringify({
         id: 'ws_123',
         project: 'demo',
-        sessionName: 'testbox-demo-usr_abc',
+        sessionName: 'testbox-demo-usr-abc',
         stagingRel: 'workspaces/usr_abc/demo',
         sshHost: 'testbox',
         remoteRoot: '~/testbox',
@@ -260,7 +260,7 @@ describe('cli', () => {
       JSON.stringify({
         id: 'ws_123',
         project: 'demo',
-        sessionName: 'testbox-demo-usr_abc',
+        sessionName: 'testbox-demo-usr-abc',
         stagingRel: 'workspaces/usr_abc/demo',
         sshHost: 'testbox',
         remoteRoot: '~/testbox',

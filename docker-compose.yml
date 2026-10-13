@@ -23,10 +23,10 @@ services:
       # Share this directory with the macOS worker (see docs/machine-setup.md).
       TESTBOX_DATA_DIR: /data
       TESTBOX_WORKER_TOKEN: ${TESTBOX_WORKER_TOKEN:-dev-worker-token}
-      # Comma-separated user tokens. Prefer `testbox login` against a bootstrapped token.
-      TESTBOX_TOKENS: ${TESTBOX_TOKENS:-}
+      # Admin token used to create users and mint their tokens (POST /v1/users, /v1/users/:id/tokens).
+      TESTBOX_BOOTSTRAP_TOKEN: ${TESTBOX_BOOTSTRAP_TOKEN:-}
     ports:
-      - '3000:3000'
+      - '${TESTBOX_API_PORT:-3000}:3000'
     volumes:
       - ${TESTBOX_DATA_DIR:-./data}:/data
     depends_on:

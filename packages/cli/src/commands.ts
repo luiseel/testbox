@@ -118,6 +118,7 @@ export class TestboxApp {
       }
       const name = sessionName(loaded.config.project, workerId ? id : owner, workerId);
       const ssh = this.ssh(sshHost, user?.identityFile);
+      await ssh.ensureStaging(remoteRoot, stagingRel);
       await ssh.create({
         name,
         source: path.dirname(loaded.file),
@@ -486,6 +487,7 @@ export class TestboxApp {
       return next;
     }
     const name = sessionName(state.project, state.id, worker.id);
+    await ssh.ensureStaging(state.remoteRoot, state.stagingRel);
     await ssh.create({
       name,
       source: sourceDir,

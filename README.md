@@ -115,7 +115,7 @@ If no API URL is configured, `run` and `verify` execute over SSH in the staging 
 docker compose up -d --build
 ```
 
-Set `TESTBOX_TOKENS=alice:secret` (comma-separated `userId:token`). The API stores a SHA-256 of the token. Requests send `Authorization: Bearer secret`. `POST /v1/jobs` is idempotent on `Idempotency-Key` plus a hash of the body.
+Set `TESTBOX_BOOTSTRAP_TOKEN` to seed an `admin` user. Create users with `POST /v1/users {"name"}` and mint their tokens with `POST /v1/users/:id/tokens`, both as admin. The API stores a SHA-256 of each token. Requests send `Authorization: Bearer <token>`. Set `TESTBOX_API_PORT` to publish the API on a host port other than 3000. `POST /v1/jobs` is idempotent on `Idempotency-Key` plus a hash of the body.
 
 Job states: `queued → assigned → running → succeeded | failed | cancelled | timed_out`. A terminal job is never moved back to a runnable state, including when a worker's lease expires. Heartbeats renew the lease every ~10s. The default lease is 30s. A sweeper runs every 15s.
 
