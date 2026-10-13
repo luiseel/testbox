@@ -8,8 +8,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "pnpm -r --filter @testbox/shared --filter @testbox/worker --filter @testbox/api --filter @testbox/cli run build",
-    "typecheck": "pnpm -r --filter @testbox/shared --filter @testbox/worker --filter @testbox/api --filter @testbox/cli run typecheck",
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
     "test": "bash scripts/ensure-redis.sh && pnpm -r --filter @testbox/shared --filter @testbox/worker --filter @testbox/api --filter @testbox/cli run test",
     "lint": "eslint .",
     "start:api": "node packages/api/dist/main.js",

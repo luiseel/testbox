@@ -4,8 +4,8 @@
   "private": true,
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
     "start": "node dist/main.js"
   },

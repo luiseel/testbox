@@ -8,8 +8,8 @@
     "testbox": "./dist/main.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
     "test": "vitest run"
   },
   "dependencies": {
