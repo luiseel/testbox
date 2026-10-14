@@ -1,5 +1,6 @@
 export function assertSessionName(name: string): void {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/.test(name)) {
+  // Mutagen session names allow only letters, digits, and dashes.
+  if (!/^[A-Za-z][A-Za-z0-9-]{0,80}$/.test(name)) {
     throw new Error(`unsafe mutagen session name: ${name}`);
   }
 }
@@ -13,8 +14,8 @@ function assertIgnore(pattern: string): void {
 export function sessionName(project: string, userId: string, workerId?: string): string {
   const parts = [project, userId];
   if (workerId) parts.push(workerId);
-  const raw = `testbox-${parts.join('-')}`.replace(/[^A-Za-z0-9._-]+/g, '-');
-  const name = raw.slice(0, 80);
+  const raw = `testbox-${parts.join('-')}`.replace(/[^A-Za-z0-9-]+/g, '-');
+  const name = raw.slice(0, 80).replace(/-+$/, '');
   assertSessionName(name);
   return name;
 }
