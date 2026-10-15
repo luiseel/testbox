@@ -34,6 +34,7 @@ async function loadLabels(env: NodeJS.ProcessEnv, dataDir: string): Promise<{
     iosSimulator: await hasIosSimulator(),
     browser: await detectBrowser(),
     pnpm: await commandOnPath('pnpm'),
+    mise: await commandOnPath('mise'),
     extra: [...extraLabels(env), ...(file?.labels ?? [])],
   });
   return { labels, capacity: file?.capacity, sshHost: file?.sshHost };

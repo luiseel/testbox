@@ -47,8 +47,11 @@ export async function ensureDependencies(opts: {
   install: (cwd: string, storeDir: string) => Promise<number>;
 }): Promise<EnsureDepsResult> {
   const digest = fingerprintDigest(opts.fingerprint);
+  // `pnpm install --frozen-lockfile` needs both files. A Gradle or Swift
+  // project has neither, so it skips the install.
   const manifest = path.join(opts.snapshotDir, 'package.json');
-  if (!(await exists(manifest))) {
+  const lockfile = path.join(opts.snapshotDir, 'pnpm-lock.yaml');
+  if (!(await exists(manifest)) || !(await exists(lockfile))) {
     return { refreshed: false, digest, skipped: true };
   }
   const stampPath = path.join(opts.cacheDir, 'stamps', `${opts.workspaceKey}.json`);

@@ -8,7 +8,7 @@ The macOS daemon is a LaunchAgent so Xcode and the iOS Simulator run inside a lo
 
 1. Create a local user named `testbox`. Give it a password and enable automatic login, or leave a GUI session logged in. A LaunchDaemon (system domain) cannot drive the Simulator.
 2. Install Xcode and the iOS Simulator runtime. Open Xcode once as `testbox` and accept the license: `sudo xcodebuild -license accept`.
-3. Install Node.js (22), pnpm, and [Mutagen](https://mutagen.io/) on both the developer machine and the worker. Playwright browsers can be installed into the warm cache on first run.
+3. Install Node.js (22), pnpm, and [Mutagen](https://mutagen.io/) on both the developer machine and the worker. Install [mise](https://mise.jdx.dev/) on the worker so jobs can pin their own tools (see [Tools with mise](#tools-with-mise)). Playwright browsers can be installed into the warm cache on first run.
 
 ## SSH
 
@@ -66,6 +66,12 @@ deploy/install-launchagent.sh
 
 `KeepAlive` restarts the process. The plist is `ProcessType=Interactive`. Logs: `~/testbox/logs/worker.*.log`.
 
+## Tools with mise
+
+Install [mise](https://mise.jdx.dev/) on the worker, as `testbox`, and put it on the `PATH` the worker starts with. The worker then adds the `mise` label by itself. A profile that needs a toolchain (Java, Go, Python, a pinned Node) can require `[mise]` in place of a label per tool.
+
+When the snapshot has `mise.toml`, `.mise.toml`, or `.tool-versions`, the worker runs `mise install` in the snapshot before the dependency install, then runs the job command with `mise exec --`, so the tools are on `PATH`. The profile command does not need a `mise exec --` prefix. The worker sets `MISE_YES=1` and `MISE_TRUSTED_CONFIG_PATHS=<data dir>` because each job uses a new snapshot directory. If `mise install` fails, the job fails before the command runs. A worker without mise ignores the mise config and uses its own tools.
+
 ## Dependency fingerprint
 
-Before install work, the worker hashes lockfiles (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `Podfile.lock`, `Package.resolved`), the Node version, architecture, and `xcodebuild -version`. A matching `cache/<fingerprint>/node_modules` is hardlinked into the snapshot. A miss runs `pnpm install --frozen-lockfile` in a throwaway copy and then promotes that `node_modules` into the cache. The snapshot's own `node_modules` is never the thing that gets cached, so a later job cannot poison the warm tree.
+Before install work, the worker hashes lockfiles (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `Podfile.lock`, `Package.resolved`), the Node version, architecture, and `xcodebuild -version`. A matching `cache/<fingerprint>/node_modules` is hardlinked into the snapshot. The install runs only when the snapshot has `package.json` and `pnpm-lock.yaml`. A miss runs `pnpm install --frozen-lockfile` in a throwaway copy and then promotes that `node_modules` into the cache. The snapshot's own `node_modules` is never the thing that gets cached, so a later job cannot poison the warm tree.

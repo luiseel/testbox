@@ -38,6 +38,7 @@ Workers pull jobs they can run. They do not expose a port. SSH is only for the f
 | systemd unit template, install script, Linux machine-setup doc | done |
 | Linux workers skip simulator reset and Xcode fingerprinting | done |
 | Capability labels, heartbeats, and worker health | done |
+| `mise` label, `mise install` and `mise exec` per job when the snapshot has a mise config | done |
 | Label routing, affinity, capacity, exclusive class, fail-fast exit 11 | done |
 | Mutagen session per worker, pinned to the worker that runs the job | done |
 | A real Mutagen session against Apple Silicon, verified in Xcode | next: needs the Mac |
@@ -78,7 +79,7 @@ profiles:
     requires: [macos, xcode]
 ```
 
-`requires` is a list of worker labels. `unit` and `e2e` omit it and can run on any healthy worker. `ios` waits for a worker that advertises `macos` and `xcode`. If no registered worker has those labels, the API returns `NO_WORKER` and the CLI exits 11.
+`requires` is a list of worker labels. A JVM, Go, or Python project can require `[mise]` and pin its tools in `mise.toml` (see [Worker](#worker)). `unit` and `e2e` omit it and can run on any healthy worker. `ios` waits for a worker that advertises `macos` and `xcode`. If no registered worker has those labels, the API returns `NO_WORKER` and the CLI exits 11.
 
 `verify <profile>` flushes Mutagen, asks the API to snapshot that user's staging tree, enqueues the job, and streams SSE until the job finishes. Ctrl-C on a TTY asks whether to cancel or detach. Without a TTY it cancels. `--detach` submits and returns the job id.
 
@@ -123,7 +124,7 @@ Latest-wins: a newer queued job for the same user, workspace, and profile marks 
 
 ## Scheduling
 
-Workers register on a heartbeat with auto-detected labels plus any extras from `TESTBOX_LABELS` or `~/testbox/worker.yml`. A worker is healthy while its heartbeat is newer than `TESTBOX_HEARTBEAT_TTL_MS` (15s).
+Workers register on a heartbeat with auto-detected labels plus any extras from `TESTBOX_LABELS` or `~/testbox/worker.yml`. Detected labels are the OS (`linux` or `macos`), the arch, `node`, `pnpm` and `mise` when they are on `PATH`, `browser`, and on macOS `xcode`, `xcode-<version>`, and `ios-simulator`. A worker is healthy while its heartbeat is newer than `TESTBOX_HEARTBEAT_TTL_MS` (15s).
 
 The scheduler assigns a queued job only when a healthy worker:
 
@@ -151,6 +152,8 @@ REDIS_URL=redis://127.0.0.1:6379 \
 TESTBOX_DATA_DIR=/tmp/testbox \
 pnpm --filter @testbox/worker start
 ```
+
+Install [mise](https://mise.jdx.dev/) on the worker to give jobs their own toolchains; the worker detects it and adds the `mise` label. When the snapshot has `mise.toml`, `.mise.toml`, or `.tool-versions`, the worker runs `mise install` (with `MISE_YES=1` and `MISE_TRUSTED_CONFIG_PATHS=<data dir>`) and then runs the job command with `mise exec --`. A failed `mise install` fails the job before the command runs. `pnpm install` runs only when the snapshot has `package.json` and `pnpm-lock.yaml`, so a Gradle or Swift project skips it.
 
 Each job runs in its own session (`detached: true`), so the command and every child share a process group. The worker forwards SIGINT, SIGTERM, and SIGHUP to that group. On cancel or timeout it sends SIGTERM, waits, then SIGKILL. A watchdog reaps descendants if the parent exits first. Shell commands go through `bash -lc` with a single quoted `-c` argument.
 

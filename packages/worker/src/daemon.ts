@@ -18,6 +18,7 @@ import {
 import { collectArtifacts } from './artifacts';
 import { buildJobEnv, secretsFromEnv } from './env';
 import { processStillOwnsJob, runCommand, killProcessGroup } from './executor';
+import { hasMiseConfig, miseEnv, miseExecArgv } from './mise';
 import { probeRuntime } from './probe';
 import { simulatorForPlatform, type SimulatorControl } from './simulator';
 import { uploadArtifacts } from './upload';
@@ -233,7 +234,7 @@ export class Daemon {
         });
         return;
       }
-      await this.prepare(job);
+      const { mise } = await this.prepare(job);
       const running = await this.store.transition(jobId, ['assigned'], 'running', {
         startedAt: Date.now(),
         leaseExpiresAt: Date.now() + this.leaseMs,
@@ -242,12 +243,12 @@ export class Daemon {
 
       const result = await runCommand({
         cwd: resolveInside(this.opts.dataDir, job.snapshotRelPath),
-        env: buildJobEnv(this.env, [], job.id),
+        env: this.jobEnv(job.id, mise),
         timeoutMs: job.timeoutMs,
         graceMs: this.opts.graceMs ?? 2_000,
         abortSignal: abort.signal,
         secrets: secretsFromEnv(this.env),
-        shell: { command: job.command },
+        shell: mise ? { argv: miseExecArgv(['bash', '-c', job.command]) } : { command: job.command },
         onSpawn: (pgid) => {
           void this.store.setPgid(job.id, pgid);
         },
@@ -278,23 +279,31 @@ export class Daemon {
     }
   }
 
-  private async prepare(job: JobRecord): Promise<void> {
+  private jobEnv(jobId: string, mise: boolean): NodeJS.ProcessEnv {
+    const env = buildJobEnv(this.env, [], jobId);
+    return mise ? miseEnv(env, this.opts.dataDir) : env;
+  }
+
+  private async prepare(job: JobRecord): Promise<{ mise: boolean }> {
     const cwd = resolveInside(this.opts.dataDir, job.snapshotRelPath);
     const actual = await directoryDigest(cwd);
     if (actual !== job.snapshotDigest) {
       throw new Error('snapshot digest mismatch');
     }
+    const mise = await this.useMise(job, cwd);
+    if (mise) await this.miseInstall(job, cwd);
     const fingerprint = await fingerprintFromDirectory(cwd, await probeRuntime());
+    const withMise = (argv: string[]) => (mise ? miseExecArgv(argv) : argv);
     const install =
       this.opts.install ??
       (async (dir: string, storeDir: string) => {
         const installed = await runCommand({
           cwd: dir,
-          env: buildJobEnv(this.env, [], job.id),
+          env: this.jobEnv(job.id, mise),
           timeoutMs: 15 * 60 * 1000,
           graceMs: this.opts.graceMs ?? 2_000,
           secrets: secretsFromEnv(this.env),
-          shell: { argv: ['pnpm', 'install', '--frozen-lockfile', '--store-dir', storeDir] },
+          shell: { argv: withMise(['pnpm', 'install', '--frozen-lockfile', '--store-dir', storeDir]) },
         });
         return installed.exitCode ?? 1;
       });
@@ -308,6 +317,35 @@ export class Daemon {
     if (job.resources === 'exclusive' && this.simulator.enabled !== false) {
       await this.simulator.reset();
       await this.noteLog(job.id, 'stderr', 'reset simulators for exclusive job');
+    }
+    return { mise };
+  }
+
+  /** Use mise only when the snapshot has a mise config and this worker has mise on `PATH`. */
+  private async useMise(job: JobRecord, cwd: string): Promise<boolean> {
+    if (!(await hasMiseConfig(cwd))) return false;
+    if (this.opts.labels.includes('mise')) return true;
+    await this.noteLog(job.id, 'stderr', 'mise config found, but this worker has no mise; using worker tools');
+    return false;
+  }
+
+  private async miseInstall(job: JobRecord, cwd: string): Promise<void> {
+    await this.noteLog(job.id, 'stderr', 'mise install');
+    const result = await runCommand({
+      cwd,
+      env: this.jobEnv(job.id, true),
+      timeoutMs: 15 * 60 * 1000,
+      graceMs: this.opts.graceMs ?? 2_000,
+      secrets: secretsFromEnv(this.env),
+      shell: { argv: ['mise', 'install'] },
+      onLog: (event) => {
+        void this.noteLog(job.id, event.stream, event.text);
+      },
+    });
+    if (result.exitCode !== 0) {
+      const message = `mise install failed with exit ${result.exitCode ?? 'null'}`;
+      await this.noteLog(job.id, 'stderr', message);
+      throw new Error(message);
     }
   }
 
