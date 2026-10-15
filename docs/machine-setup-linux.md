@@ -65,6 +65,10 @@ labels:
 
 `TESTBOX_LABELS` adds more labels. It does not replace the ones the worker detects (`linux` or `macos`, `arm64` or `x64`, `node`, `pnpm` and `mise` when they are on `PATH`, `browser` when a browser is installed). On macOS the worker also adds `xcode`, `xcode-<version>`, and `ios-simulator` when those tools exist. Linux never probes Xcode or the simulator.
 
+## What SSH commands need
+
+Before each job, the CLI runs `node ~/testbox/app/packages/worker/dist/snapshot-cli.js` on the worker over SSH, in a non-interactive shell. `node` must be on the `PATH` of that shell (most distributions read `~/.bashrc` for it), `~/testbox/app` must be the checkout or a link to it, and `flock` (from `util-linux`) must be installed. Check from the developer machine: `ssh testbox@<host> 'command -v node flock; ls ~/testbox/app/packages/worker/dist/snapshot-cli.js'` prints three paths.
+
 ## Worker service
 
 Build the worker, then install the unit as `testbox`:

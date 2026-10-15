@@ -21,6 +21,34 @@ mkdir -p ~/.ssh && chmod 700 ~/.ssh
 touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
 ```
 
+### What SSH commands need
+
+Before each job, the CLI runs `node ~/testbox/app/packages/worker/dist/snapshot-cli.js` on the worker over SSH. That command runs in a non-interactive shell, which does not read `~/.zprofile` or `~/.zshrc`. Do these three steps as `testbox`, or the snapshot fails:
+
+1. Put `node` on the `PATH` for SSH commands. zsh reads `~/.zshenv` for every shell:
+
+   ```sh
+   echo 'export PATH="/opt/homebrew/bin:$PATH"' >> ~/.zshenv
+   ```
+
+   Without it: `node: command not found`.
+2. Link the checkout to the path the CLI expects (`snapshotBin` in the CLI config):
+
+   ```sh
+   mkdir -p ~/testbox && ln -s ~/code/testbox ~/testbox/app
+   ```
+
+   Change `~/code/testbox` to the place of your checkout.
+3. Install `flock`. macOS does not have it, and the snapshot uses it to lock the workspace:
+
+   ```sh
+   brew install flock
+   ```
+
+   Without it: `spawn flock ENOENT`.
+
+Check from the developer machine: `ssh testbox@<mac> 'command -v node flock; ls ~/testbox/app/packages/worker/dist/snapshot-cli.js'` prints three paths.
+
 Remote login must be enabled. Mutagen sessions are one-way replicas (`developer -> testbox`) with `ignore-vcs` and the ignore list from `testbox.yml`. The CLI never interpolates shell commands into a remote string; arguments are quoted.
 
 ## Twingate
@@ -64,7 +92,13 @@ export TESTBOX_WORKER_TOKEN=dev-worker-token
 deploy/install-launchagent.sh
 ```
 
-`KeepAlive` restarts the process. The plist is `ProcessType=Interactive`. Logs: `~/testbox/logs/worker.*.log`.
+On a fleet, Redis and the API run on one host. Set `REDIS_URL` and `TESTBOX_API_URL` to that host's LAN IP, not `127.0.0.1`. Set `TESTBOX_SSH_HOST` to `testbox@<lan-ip>`: a `.local` name does not resolve through Twingate.
+
+`KeepAlive` restarts the process. The plist is `ProcessType=Interactive`. Logs: `~/testbox/logs/worker.*.log`. Keep backups of the plist out of `~/Library/LaunchAgents`, because launchd can load them at login.
+
+### Local Network permission
+
+macOS blocks a LaunchAgent from LAN addresses until the user allows it. SSH sessions are not blocked, so a test over SSH can pass while the worker fails. The worker log then shows `connect EHOSTUNREACH <redis-ip>:6379` and the worker does not register. On the Mac's screen, allow the prompt for `node`, or turn on `node` in **System Settings → Privacy & Security → Local Network**. You cannot do this over SSH.
 
 ## Tools with mise
 
