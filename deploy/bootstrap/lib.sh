@@ -78,9 +78,21 @@ sync_repo() {
     if [ -n "$(git -C "$dir" status --porcelain --untracked-files=no)" ]; then
       fail "$dir has local changes. Commit or discard them, then run this command again."
     fi
-    git -C "$dir" fetch --quiet origin
-    git -C "$dir" checkout --quiet "$TB_GIT_REF"
-    git -C "$dir" merge --quiet --ff-only "origin/$TB_GIT_REF" >&2
+    if git -C "$dir" show-ref --verify --quiet "refs/heads/$TB_GIT_REF"; then
+      git -C "$dir" checkout --quiet "$TB_GIT_REF"
+      # Commits that no remote branch had before this fetch exist only here.
+      local unpushed
+      unpushed=$(git -C "$dir" rev-list HEAD --not --remotes | head -n 1)
+      git -C "$dir" fetch --quiet --prune origin
+      if ! git -C "$dir" merge --quiet --ff-only "origin/$TB_GIT_REF" >/dev/null 2>&1; then
+        [ -z "$unpushed" ] || fail "$dir has commits on $TB_GIT_REF that are not on the remote. Push or remove them, then run this command again."
+        log "$TB_GIT_REF was rewritten on the remote; reset to origin/$TB_GIT_REF"
+        git -C "$dir" reset --quiet --hard "origin/$TB_GIT_REF"
+      fi
+    else
+      git -C "$dir" fetch --quiet --prune origin
+      git -C "$dir" checkout --quiet -b "$TB_GIT_REF" "origin/$TB_GIT_REF"
+    fi
   elif [ -e "$dir" ]; then
     fail "$dir exists and is not a git checkout"
   else

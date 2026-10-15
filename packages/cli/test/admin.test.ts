@@ -86,6 +86,42 @@ describe('bootstrap scripts', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  it('follows a rewritten branch but never drops a commit that exists only on the host', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'tb-git-'));
+    const git = (cwd: string, ...args: string[]) =>
+      promisify(execFile)('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'init.defaultBranch=main', ...args], { cwd });
+    const dir = path.join(root, 'scripts');
+    await mkdir(dir);
+    await copyFile(path.join(bootstrapDir(), 'lib.sh'), path.join(dir, 'lib.sh'));
+    await writeFile(path.join(dir, 'sync.sh'), 'sync_repo "$TB_DIR"\nresult "{\\"head\\":\\"$(git -C "$TB_DIR" log -1 --format=%s)\\"}"\n');
+    const sync = async () => {
+      const input = await composeScript('sync', { TB_DIR: path.join(root, 'host'), TB_GIT_URL: path.join(root, 'origin.git'), TB_GIT_REF: 'main' }, dir);
+      return localBash.run('ssh', [], { input });
+    };
+    try {
+      await git(root, 'init', '--bare', 'origin.git');
+      await git(root, 'clone', 'origin.git', 'dev');
+      const dev = path.join(root, 'dev');
+      await git(dev, 'commit', '--allow-empty', '-m', 'one');
+      await git(dev, 'push', 'origin', 'HEAD:main');
+      expect(parseResult<{ head: string }>((await sync()).stdout).head).toBe('one');
+
+      await git(dev, 'commit', '--amend', '--allow-empty', '-m', 'one rewritten');
+      await git(dev, 'push', '--force', 'origin', 'HEAD:main');
+      expect(parseResult<{ head: string }>((await sync()).stdout).head).toBe('one rewritten');
+
+      await git(path.join(root, 'host'), 'commit', '--allow-empty', '-m', 'only on the host');
+      await git(dev, 'commit', '--amend', '--allow-empty', '-m', 'rewritten again');
+      await git(dev, 'push', '--force', 'origin', 'HEAD:main');
+      const refused = await sync();
+      expect(refused.code).not.toBe(0);
+      expect(refused.stderr).toContain('commits on main that are not on the remote');
+      expect((await git(path.join(root, 'host'), 'log', '-1', '--format=%s')).stdout.trim()).toBe('only on the host');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('composes every setup script into valid bash', async () => {
     const names = (await readdir(bootstrapDir())).filter((name) => name.endsWith('.sh') && name !== 'lib.sh');
     expect(names.sort()).toEqual(['control-plane.sh', 'read-secrets.sh', 'worker.sh']);
