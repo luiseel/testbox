@@ -16,7 +16,7 @@ function numberFrom(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed >= 1 ? Math.trunc(parsed) : fallback;
 }
 
-async function loadLabels(env: NodeJS.ProcessEnv, dataDir: string): Promise<{
+async function loadLabels(env: NodeJS.ProcessEnv, dataDir: string, workerId: string): Promise<{
   labels: string[];
   capacity?: number;
   sshHost?: string;
@@ -35,7 +35,8 @@ async function loadLabels(env: NodeJS.ProcessEnv, dataDir: string): Promise<{
     browser: await detectBrowser(),
     pnpm: await commandOnPath('pnpm'),
     mise: await commandOnPath('mise'),
-    extra: [...extraLabels(env), ...(file?.labels ?? [])],
+    // `worker:<id>` lets a profile (or `testbox admin add-worker`) target one machine.
+    extra: [...extraLabels(env), ...(file?.labels ?? []), `worker:${workerId}`],
   });
   return { labels, capacity: file?.capacity, sshHost: file?.sshHost };
 }
@@ -44,12 +45,13 @@ async function main(): Promise<void> {
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) throw new Error('REDIS_URL is required');
   const dataDir = process.env.TESTBOX_DATA_DIR ?? path.join(os.homedir(), 'testbox');
-  const detected = await loadLabels(process.env, dataDir);
+  const workerId = process.env.TESTBOX_WORKER_ID ?? `${os.hostname()}-1`;
+  const detected = await loadLabels(process.env, dataDir, workerId);
   const daemon = await startDaemon({
     redisUrl,
     keyPrefix: process.env.TESTBOX_KEY_PREFIX ?? 'testbox',
     dataDir,
-    workerId: process.env.TESTBOX_WORKER_ID ?? `${os.hostname()}-1`,
+    workerId,
     labels: detected.labels,
     hostname: os.hostname(),
     capacity: numberFrom(process.env.TESTBOX_CAPACITY, detected.capacity ?? 1),

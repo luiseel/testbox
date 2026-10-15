@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Command, CommanderError } from 'commander';
 import type { EventEmitter } from 'events';
-import { AdminApp, type InitControlPlaneFlags } from './admin';
+import { AdminApp, type AddWorkerFlags, type InitControlPlaneFlags, type UpgradeFlags } from './admin';
 import { TestboxApp, type CliIO } from './commands';
 import { defaultSpawn } from './remote';
 
@@ -114,6 +114,34 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
     .option('--user <name>', 'your user name on the API (default: your login name)')
     .action(async (sshHost: string, opts: InitControlPlaneFlags) => {
       code = await adminApp.initControlPlane(sshHost, opts);
+    });
+
+  admin
+    .command('add-worker')
+    .description('install or repair a worker on a host, wait for it, and run a test job on it')
+    .argument('<ssh-host>', 'user@host of the worker machine')
+    .option('--address <ip>', 'LAN IP that developers sync to (default: the host in <ssh-host>)')
+    .option('--id <id>', 'worker id (default: <short hostname>-1)')
+    .option('--capacity <n>', 'jobs at the same time', '1')
+    .option('--labels <list>', 'extra labels, comma-separated')
+    .option('--repo-dir <dir>', 'checkout on the host', '~/testbox/app')
+    .option('--data-dir <dir>', 'worker data directory on the host', '~/testbox')
+    .option('--git-url <url>', 'repo to clone (default: origin of this checkout)')
+    .option('--ref <branch>', 'branch to deploy', 'main')
+    .option('--wait <seconds>', 'how long to wait for the first heartbeat', '600')
+    .option('--no-smoke', 'skip the test job')
+    .action(async (sshHost: string, opts: AddWorkerFlags) => {
+      code = await adminApp.addWorker(sshHost, opts);
+    });
+
+  admin
+    .command('upgrade')
+    .description('update the control plane, then pull, build, and restart every worker')
+    .option('--git-url <url>', 'repo to pull (default: origin of this checkout)')
+    .option('--ref <branch>', 'branch to deploy', 'main')
+    .option('--no-control-plane', 'update the workers only')
+    .action(async (opts: UpgradeFlags) => {
+      code = await adminApp.upgrade(opts);
     });
 
   admin

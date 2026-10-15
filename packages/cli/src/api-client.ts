@@ -152,8 +152,11 @@ export class HttpApi {
     };
   }
 
-  async listWorkers(): Promise<{ id: string; healthy: boolean; labels: string[] }[]> {
-    const body = await this.request<{ workers: { id: string; healthy: boolean; labels: string[] }[] }>('GET', '/v1/workers');
+  async listWorkers(): Promise<{ id: string; healthy: boolean; labels: string[]; sshHost?: string | null }[]> {
+    const body = await this.request<{ workers: { id: string; healthy: boolean; labels: string[]; sshHost?: string | null }[] }>(
+      'GET',
+      '/v1/workers',
+    );
     return body.workers;
   }
 

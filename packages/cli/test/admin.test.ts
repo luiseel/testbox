@@ -1,12 +1,13 @@
-import { spawn } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { EventEmitter } from 'events';
-import { copyFile, mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises';
+import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { promisify } from 'util';
 import { describe, expect, it } from 'vitest';
-import { defaultUserName } from '../src/admin';
+import { defaultUserName, workerRedisUrl } from '../src/admin';
 import { bootstrapDir, composeScript, ipFromSshHost, parseResult, runBootstrap } from '../src/bootstrap';
-import { adminConfigPath, userConfigPath } from '../src/config-store';
+import { adminConfigPath, userConfigPath, writeAdminConfig } from '../src/config-store';
 import { runCli } from '../src/main';
 import type { CommandResult, RemoteRunner, RunOptions } from '../src/remote';
 
@@ -85,7 +86,69 @@ describe('bootstrap scripts', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  it('composes every setup script into valid bash', async () => {
+    const names = (await readdir(bootstrapDir())).filter((name) => name.endsWith('.sh') && name !== 'lib.sh');
+    expect(names.sort()).toEqual(['control-plane.sh', 'read-secrets.sh', 'worker.sh']);
+    for (const name of names) {
+      const script = await composeScript(name.replace(/\.sh$/, ''), { TB_X: 'y' });
+      await expect(promisify(execFile)('bash', ['-n', '-c', script])).resolves.toBeDefined();
+    }
+  });
+
+  it('installs the LaunchAgent and the systemd unit with bin on PATH, labels, and mode 0600', async () => {
+    const repo = path.resolve(bootstrapDir(), '..', '..');
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-svc-'));
+    const stubs = path.join(home, 'stubs');
+    await mkdir(stubs);
+    for (const name of ['launchctl', 'systemctl']) {
+      // `launchctl print` exits 1: the agent is not loaded, so install does not wait.
+      await writeFile(path.join(stubs, name), `#!/bin/sh\necho "$0 $*" >> "${home}/calls.log"\n[ "$1" = print ] && exit 1\nexit 0\n`);
+      await chmod(path.join(stubs, name), 0o755);
+    }
+    await mkdir(path.join(repo, 'packages', 'worker', 'dist'), { recursive: true });
+    const env = {
+      ...process.env,
+      HOME: home,
+      XDG_CONFIG_HOME: path.join(home, '.config'),
+      PATH: `${stubs}:${process.env.PATH ?? ''}`,
+      NODE_BIN: process.execPath,
+      TESTBOX_DATA_DIR: path.join(home, 'testbox'),
+      REDIS_URL: 'redis://:pw@10.0.0.5:6379',
+      TESTBOX_API_URL: 'http://10.0.0.5:3000',
+      TESTBOX_WORKER_TOKEN: 'w0rker',
+      TESTBOX_WORKER_ID: 'mac-1',
+      TESTBOX_SSH_HOST: 'me@10.0.0.9',
+      TESTBOX_LABELS: 'gpu,big-disk',
+    };
+    const run = promisify(execFile);
+    const mainJs = path.join(repo, 'packages', 'worker', 'dist', 'main.js');
+    const hadMain = await stat(mainJs).then(() => true, () => false);
+    if (!hadMain) await writeFile(mainJs, '');
+    try {
+      await run('sh', [path.join(repo, 'deploy', 'install-launchagent.sh')], { env });
+      const plist = path.join(home, 'Library', 'LaunchAgents', 'com.testbox.worker.plist');
+      const text = await readFile(plist, 'utf8');
+      expect(text).toContain(`<string>${home}/testbox/bin:/opt/homebrew/bin:`);
+      expect(text).toContain('<string>gpu,big-disk</string>');
+      expect(text).toContain('<string>redis://:pw@10.0.0.5:6379</string>');
+      expect((await stat(plist)).mode & 0o777).toBe(0o600);
+
+      await run('sh', [path.join(repo, 'deploy', 'install-systemd.sh')], { env });
+      const unit = path.join(home, '.config', 'systemd', 'user', 'testbox-worker.service');
+      const unitText = await readFile(unit, 'utf8');
+      expect(unitText).toContain(`Environment=PATH=${home}/testbox/bin:`);
+      expect(unitText).toContain('Environment=TESTBOX_LABELS=gpu,big-disk');
+      expect((await stat(unit)).mode & 0o777).toBe(0o600);
+      expect(await readFile(path.join(home, 'calls.log'), 'utf8')).toContain('restart testbox-worker.service');
+    } finally {
+      if (!hadMain) await rm(mainJs, { force: true });
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   it('takes the address from an IP ssh host and makes a valid user name', () => {
+    expect(workerRedisUrl('10.0.0.5', 6379, 'a/b')).toBe('redis://:a%2Fb@10.0.0.5:6379');
+    expect(workerRedisUrl('10.0.0.5', 6379, '')).toBe('redis://10.0.0.5:6379');
     expect(ipFromSshHost('luiseel@192.168.1.62')).toBe('192.168.1.62');
     expect(ipFromSshHost('omarchy.local')).toBeNull();
     expect(defaultUserName('Luis.Espinoza')).toBe('luis-espinoza');
@@ -168,6 +231,84 @@ describe('testbox admin', () => {
       expect(await runCli(['admin', 'add-user', 'ana'], io)).toBe(0);
       expect(stdout.join('')).toMatch(/^testbox login --api-url http:\/\/10\.0\.0\.5:3000 --token tok-\d+\n$/);
       expect(requests.filter((r) => r === 'POST /v1/users')).toHaveLength(1);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('adds a worker with the control-plane secrets and upgrades every worker', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-admin-w-'));
+    const stderr: string[] = [];
+    const scripts: { host: string; input: string }[] = [];
+    const remote: RemoteRunner = {
+      async run(file, args, opts): Promise<CommandResult> {
+        if (file === 'git') return { code: 0, stdout: 'git@example.com:me/testbox.git\n', stderr: '' };
+        const input = opts?.input ?? '';
+        scripts.push({ host: args[args.length - 3] ?? '', input });
+        if (input.includes('Print the control-plane secrets')) {
+          return {
+            code: 0,
+            stdout: 'TESTBOX_RESULT {"workerToken":"w0rker","bootstrapToken":"boot","redisPassword":"pa55","apiPort":"3000","redisPort":"6379"}\n',
+            stderr: '',
+          };
+        }
+        if (input.includes("export TB_MODE='upgrade'") && args.includes('bad@10.0.0.8')) {
+          return { code: 1, stdout: '', stderr: 'error: the worker service is not installed\n' };
+        }
+        return {
+          code: 0,
+          stdout: 'TESTBOX_RESULT {"os":"linux","workerId":"box-1","xcode":false,"localNetworkBlocked":false,"node":"v22.23.3"}\n',
+          stderr: '',
+        };
+      },
+    };
+    const fetchImpl = async (url: string | URL | Request): Promise<Response> => {
+      const target = new URL(String(url));
+      if (target.pathname === '/v1/healthz') return new Response('{"ok":true}', { status: 200 });
+      if (target.pathname === '/v1/workers') {
+        return new Response(
+          JSON.stringify({
+            workers: [
+              { id: 'box-1', healthy: true, labels: ['linux', 'worker:box-1'], sshHost: 'me@10.0.0.7' },
+              { id: 'bad-1', healthy: false, labels: [], sshHost: 'bad@10.0.0.8' },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response('{}', { status: 404 });
+    };
+    await writeAdminConfig(home, {
+      controlPlane: { sshHost: 'me@10.0.0.5', address: '10.0.0.5', apiPort: 3000, redisPort: 6379, repoDir: '~/testbox/app' },
+    });
+    const io = {
+      homeDir: home,
+      cwd: home,
+      stdout: { write: () => undefined },
+      stderr: { write: (chunk: string) => stderr.push(chunk) },
+      remote,
+      isTTY: false,
+      signals: new EventEmitter(),
+      prompt: async () => '',
+      fetchImpl: fetchImpl as typeof fetch,
+    };
+    try {
+      expect(await runCli(['admin', 'add-worker', 'me@10.0.0.7', '--labels', 'gpu', '--no-smoke'], io)).toBe(0);
+      const install = scripts.find((entry) => entry.input.includes("export TB_MODE='install'"));
+      expect(install?.input).toContain("export TB_REDIS_URL='redis://:pa55@10.0.0.5:6379'");
+      expect(install?.input).toContain("export TB_WORKER_TOKEN='w0rker'");
+      expect(install?.input).toContain("export TB_ADDRESS='10.0.0.7'");
+      expect(install?.input).toContain("export TB_LABELS='gpu'");
+      expect(stderr.join('')).toContain('worker box-1 is healthy: linux, worker:box-1');
+
+      scripts.length = 0;
+      stderr.length = 0;
+      expect(await runCli(['admin', 'upgrade', '--no-control-plane'], io)).toBe(1);
+      const upgrades = scripts.filter((entry) => entry.input.includes("export TB_MODE='upgrade'"));
+      expect(upgrades).toHaveLength(2);
+      expect(upgrades[0]?.input).not.toContain('export TB_WORKER_TOKEN');
+      expect(stderr.join('')).toContain('bad-1: worker failed on bad@10.0.0.8: the worker service is not installed');
+      expect(stderr.join('')).toContain('1 of 2 workers did not come back');
     } finally {
       await rm(home, { recursive: true, force: true });
     }

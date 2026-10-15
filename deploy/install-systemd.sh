@@ -13,11 +13,12 @@ WORKER_ID="${TESTBOX_WORKER_ID:-$(hostname -s)-1}"
 WORKER_TOKEN="${TESTBOX_WORKER_TOKEN:-}"
 SSH_HOST="${TESTBOX_SSH_HOST:-testbox@$(hostname -s)}"
 CAPACITY="${TESTBOX_CAPACITY:-1}"
+LABELS="${TESTBOX_LABELS:-}"
 SERVICE_USER="${TESTBOX_SERVICE_USER:-testbox}"
 SCOPE="${TESTBOX_SYSTEMD_SCOPE:-user}"
 TEMPLATE="$REPO/deploy/testbox-worker.service.template"
 NODE_DIR="$(dirname "$NODE_BIN")"
-PATH_VALUE="${NODE_DIR}:/usr/local/bin:/usr/bin:/bin"
+PATH_VALUE="${DATA_DIR}/bin:${NODE_DIR}:/usr/local/bin:/usr/bin:/bin"
 
 if [ -z "$NODE_BIN" ] || [ ! -x "$NODE_BIN" ]; then
   echo "node not found; set NODE_BIN" >&2
@@ -59,12 +60,16 @@ sed \
   -e "s|__WORKER_TOKEN__|$WORKER_TOKEN|g" \
   -e "s|__SSH_HOST__|$SSH_HOST|g" \
   -e "s|__CAPACITY__|$CAPACITY|g" \
+  -e "s|__LABELS__|$LABELS|g" \
   -e "s|__HOME__|$HOME_DIR|g" \
   -e "s|__PATH__|$PATH_VALUE|g" \
   -e "s|__USER_LINE__|$USER_LINE|g" \
   -e "s|__WANTED_BY__|$WANTED_BY|g" \
   "$TEMPLATE" > "$DEST"
+# The unit holds the worker token and the Redis password.
+chmod 600 "$DEST"
 
 $SYSTEMCTL daemon-reload
-$SYSTEMCTL enable --now testbox-worker.service
+$SYSTEMCTL enable testbox-worker.service
+$SYSTEMCTL restart testbox-worker.service
 echo "installed $DEST"

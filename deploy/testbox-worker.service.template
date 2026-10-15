@@ -15,6 +15,7 @@ Environment=TESTBOX_API_URL=__API_URL__
 Environment=TESTBOX_WORKER_TOKEN=__WORKER_TOKEN__
 Environment=TESTBOX_SSH_HOST=__SSH_HOST__
 Environment=TESTBOX_CAPACITY=__CAPACITY__
+Environment=TESTBOX_LABELS=__LABELS__
 Environment=PATH=__PATH__
 ExecStart=__NODE__ __REPO__/packages/worker/dist/main.js
 Restart=always

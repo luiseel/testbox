@@ -172,7 +172,9 @@ export class MutagenSsh {
       quoteShellArg(opts.snapshotId),
     ];
     for (const pattern of opts.ignore) args.push('--ignore', quoteShellArg(pattern));
-    const script = `node ${args.join(' ')}`;
+    // The worker setup links node and flock into <data dir>/bin; an SSH
+    // command does not read shell profiles, so put it first on PATH.
+    const script = `PATH="$HOME/${dataRel}/bin:$PATH" node ${args.join(' ')}`;
     const result = await this.ssh(`bash -c ${quoteShellArg(script)}`);
     if (result.code !== 0) throw new SyncError(result.stderr || 'snapshot failed');
     return JSON.parse(result.stdout) as { digest: string; relPath: string };
