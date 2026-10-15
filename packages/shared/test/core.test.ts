@@ -1,5 +1,5 @@
 import { execFile } from 'child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { promisify } from 'util';
@@ -11,6 +11,7 @@ import {
   buildShellSpawn,
   canTransition,
   collectLockfiles,
+  ensureDependencies,
   fingerprintDigest,
   isTerminal,
   matchGlob,
@@ -90,6 +91,41 @@ describe('fingerprint', () => {
     expect(needsDependencyRefresh(nextLock, nextXcode)).toBe(true);
     const nextArch = buildFingerprint(await collectLockfiles(dir), { ...runtime, arch: 'x64' });
     expect(needsDependencyRefresh(nextLock, nextArch)).toBe(true);
+    await rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('dependencies', () => {
+  it('runs pnpm install only when the snapshot has package.json and pnpm-lock.yaml', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'deps-'));
+    const snapshotDir = path.join(dir, 'snap');
+    await mkdir(snapshotDir);
+    const fingerprint = buildFingerprint(await collectLockfiles(snapshotDir), {
+      nodeVersion: 'v22.0.0',
+      arch: 'arm64',
+      platform: 'linux',
+      xcodeVersion: null,
+    });
+    const installs: string[] = [];
+    const run = () =>
+      ensureDependencies({
+        snapshotDir,
+        cacheDir: path.join(dir, 'cache'),
+        workspaceKey: 'ws_1',
+        fingerprint,
+        install: async (cwd) => {
+          installs.push(cwd);
+          return 0;
+        },
+      });
+    await writeFile(path.join(snapshotDir, 'build.gradle'), '\n');
+    expect((await run()).skipped).toBe(true);
+    await writeFile(path.join(snapshotDir, 'package.json'), '{}\n');
+    expect((await run()).skipped).toBe(true);
+    expect(installs).toEqual([]);
+    await writeFile(path.join(snapshotDir, 'pnpm-lock.yaml'), 'lock\n');
+    expect((await run()).skipped).toBe(false);
+    expect(installs).toEqual([snapshotDir]);
     await rm(dir, { recursive: true, force: true });
   });
 });

@@ -40,10 +40,12 @@ export function capabilityLabels(input: {
   iosSimulator: boolean;
   browser: boolean;
   pnpm: boolean;
+  mise?: boolean;
   extra?: readonly string[];
 }): string[] {
   const labels = [osLabel(input.platform), archLabel(input.arch), 'node'];
   if (input.pnpm) labels.push('pnpm');
+  if (input.mise) labels.push('mise');
   if (input.platform === 'darwin') {
     labels.push(...xcodeLabels(input.xcodeVersion));
     if (input.iosSimulator) labels.push('ios-simulator');

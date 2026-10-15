@@ -95,6 +95,7 @@ describe('dependency cache', () => {
     await mkdir(snapshotB, { recursive: true });
     await writeFile(path.join(snapshotA, 'package.json'), '{"name":"demo"}\n');
     await writeFile(path.join(snapshotB, 'package.json'), '{"name":"demo"}\n');
+    for (const dir of [snapshotA, snapshotB]) await writeFile(path.join(dir, 'pnpm-lock.yaml'), 'lock\n');
     const fp = buildFp('lock-a');
     let installs = 0;
     const install = async (cwd: string) => {

@@ -1,5 +1,5 @@
 import type { INestApplication } from '@nestjs/common';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -280,6 +280,55 @@ describe('queue and execution', () => {
     expect(unitJob.workerId).toBe('linux-1');
   });
 
+  it('installs mise tools and runs the command under mise exec when the snapshot has mise.toml', async () => {
+    const ctx = await boot({ labels: ['linux', 'node', 'mise'], env: await fakeMiseEnv(0) });
+    open.push(ctx);
+    const alice = await user(ctx, 'alice');
+    const job = await submit(ctx, alice.token, {
+      command: [
+        'test -f installed.marker',
+        'test "$FAKE_MISE_EXEC" = 1',
+        'test "$MISE_YES" = 1',
+        `test "$MISE_TRUSTED_CONFIG_PATHS" = ${shellQuote(ctx.dataDir)}`,
+      ].join(' && '),
+      requires: ['mise'],
+      files: { 'mise.toml': '[tools]\njava = "temurin-25"\n' },
+    });
+    expect(job.status).toBe(201);
+    await ctx.daemon?.startProcessing();
+    const done = await waitJob(ctx, alice.token, job.json.job.id as string);
+    expect(done.state).toBe('succeeded');
+  });
+
+  it('fails the job without running the command when mise install fails', async () => {
+    const ctx = await boot({ labels: ['linux', 'node', 'mise'], env: await fakeMiseEnv(3) });
+    open.push(ctx);
+    const alice = await user(ctx, 'alice');
+    const marker = path.join(ctx.dataDir, 'ran.txt');
+    const job = await submit(ctx, alice.token, {
+      command: `echo RAN > ${shellQuote(marker)}`,
+      files: { '.tool-versions': 'java temurin-25\n' },
+    });
+    await ctx.daemon?.startProcessing();
+    const done = await waitJob(ctx, alice.token, job.json.job.id as string);
+    expect(done.state).toBe('failed');
+    expect(done.error).toBe('mise install failed with exit 3');
+    await expect(readFile(marker, 'utf8')).rejects.toThrow();
+  });
+
+  it('runs with worker tools when the snapshot has mise.toml but the worker has no mise', async () => {
+    const ctx = await boot({ labels: ['linux', 'node'], env: await fakeMiseEnv(0) });
+    open.push(ctx);
+    const alice = await user(ctx, 'alice');
+    const job = await submit(ctx, alice.token, {
+      command: 'test ! -f installed.marker && test -z "$FAKE_MISE_EXEC"',
+      files: { 'mise.toml': '[tools]\n' },
+    });
+    await ctx.daemon?.startProcessing();
+    const done = await waitJob(ctx, alice.token, job.json.job.id as string);
+    expect(done.state).toBe('succeeded');
+  });
+
   it('rejects a job when no registered worker can ever satisfy its labels', async () => {
     const ctx = await boot({ workerId: 'linux-1', labels: ['linux', 'x64', 'node'] });
     open.push(ctx);
@@ -382,6 +431,7 @@ async function boot(opts?: {
   workerId?: string;
   labels?: string[];
   capacity?: number;
+  env?: NodeJS.ProcessEnv;
 }): Promise<Ctx> {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), 'tb-e2e-'));
   const prefix = `e2e_${Math.random().toString(16).slice(2)}`;
@@ -417,6 +467,7 @@ async function boot(opts?: {
           workerToken: 'worker-token-secret-123',
           processImmediately: false,
           simulator: opts?.simulator,
+          env: opts?.env,
         });
   return {
     app,
@@ -469,6 +520,7 @@ async function submit(
     requires?: string[];
     mutateSnapshot?: boolean;
     workspace?: { id: string; stagingRel: string };
+    files?: Record<string, string>;
   },
 ) {
   const ws = opts.workspace
@@ -478,6 +530,9 @@ async function submit(
   const staging = path.join(ctx.dataDir, ws.json.stagingRel as string);
   await mkdir(staging, { recursive: true });
   await writeFile(path.join(staging, 'keep.txt'), 'keep\n');
+  for (const [name, text] of Object.entries(opts.files ?? {})) {
+    await writeFile(path.join(staging, name), text);
+  }
   const snapshotId = createId('snap');
   const snap = await createSnapshot({
     dataDir: ctx.dataDir,
@@ -502,6 +557,26 @@ async function submit(
     requires: opts.requires,
     timeoutMs: 20_000,
   });
+}
+
+/**
+ * Worker env with a fake `mise` first on PATH. `install` leaves a marker in
+ * the snapshot and exits with `installExit`; `exec` runs the rest of argv.
+ */
+async function fakeMiseEnv(installExit: number): Promise<NodeJS.ProcessEnv> {
+  const bin = await mkdtemp(path.join(os.tmpdir(), 'tb-mise-'));
+  const script = [
+    '#!/usr/bin/env bash',
+    'case "$1" in',
+    `  install) touch installed.marker; exit ${installExit} ;;`,
+    '  exec) shift; [ "$1" = -- ] && shift; export FAKE_MISE_EXEC=1; exec "$@" ;;',
+    'esac',
+    'exit 2',
+    '',
+  ].join('\n');
+  await writeFile(path.join(bin, 'mise'), script);
+  await chmod(path.join(bin, 'mise'), 0o755);
+  return { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` };
 }
 
 async function extraDaemon(
