@@ -1,3 +1,7 @@
+# A fixed project name, so the containers and the Redis volume are the same
+# whatever the checkout folder is called.
+name: testbox
+
 services:
   redis:
     image: redis:7-alpine
