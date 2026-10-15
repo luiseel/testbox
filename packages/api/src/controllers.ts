@@ -72,6 +72,15 @@ export class UsersController {
     return { id: req.principal.id, name: req.principal.name, role: req.principal.role };
   }
 
+  /** Admin lookup by name, so `testbox admin add-user` can issue a new token to an existing user. */
+  @Roles('admin')
+  @Get()
+  async find(@Query('name') name: string | undefined): Promise<{ users: { id: string; name: string; role: string }[] }> {
+    const input = parse(z.object({ name: z.string().min(1) }), { name });
+    const user = await this.auth.findUserByName(input.name);
+    return { users: user ? [{ id: user.id, name: user.name, role: user.role }] : [] };
+  }
+
   @Roles('admin')
   @Post()
   async create(@Req() req: AuthedRequest, @Body() body: unknown): Promise<{ id: string; name: string }> {

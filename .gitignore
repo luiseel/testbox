@@ -11,3 +11,4 @@ coverage/
 tmp/
 data/
 *.tsbuildinfo
+.compose-up.log

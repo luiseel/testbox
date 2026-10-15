@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command, CommanderError } from 'commander';
 import type { EventEmitter } from 'events';
+import { AdminApp, type InitControlPlaneFlags } from './admin';
 import { TestboxApp, type CliIO } from './commands';
 import { defaultSpawn } from './remote';
 
@@ -27,6 +28,7 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
     fetchImpl: io.fetchImpl,
   };
   const app = new TestboxApp(full, json);
+  const adminApp = new AdminApp(full, json);
   let code = 0;
   const program = new Command();
   program.exitOverride();
@@ -94,6 +96,32 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
     .argument('<job-id>')
     .action(async (jobId: string) => {
       code = await app.artifacts(jobId);
+    });
+
+  const admin = program.command('admin').description('set up the control plane, workers, and users over SSH');
+
+  admin
+    .command('init-control-plane')
+    .description('install or update the API and Redis on a host, then log in')
+    .argument('<ssh-host>', 'user@host of the control-plane machine')
+    .option('--address <ip>', 'LAN IP that workers and developers use (default: the host in <ssh-host>)')
+    .option('--api-port <port>', 'API port', '3000')
+    .option('--redis-port <port>', 'Redis port that workers connect to', '6379')
+    .option('--repo-dir <dir>', 'checkout on the host', '~/testbox/app')
+    .option('--data-dir <dir>', 'API data directory on the host', '~/testbox')
+    .option('--git-url <url>', 'repo to clone (default: origin of this checkout)')
+    .option('--ref <branch>', 'branch to deploy', 'main')
+    .option('--user <name>', 'your user name on the API (default: your login name)')
+    .action(async (sshHost: string, opts: InitControlPlaneFlags) => {
+      code = await adminApp.initControlPlane(sshHost, opts);
+    });
+
+  admin
+    .command('add-user')
+    .description('create a user (or reuse it) and print a new token for them')
+    .argument('<name>', 'lower case, for example ana or ci-bot')
+    .action(async (name: string) => {
+      code = await adminApp.addUser(name);
     });
 
   try {

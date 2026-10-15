@@ -1,13 +1,20 @@
 services:
   redis:
     image: redis:7-alpine
-    command: ['redis-server', '--appendonly', 'yes']
+    # Workers on other hosts connect to this port, so set TESTBOX_REDIS_PASSWORD
+    # on a LAN. Empty means no password (local development only).
+    environment:
+      TESTBOX_REDIS_PASSWORD: ${TESTBOX_REDIS_PASSWORD:-}
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes $${TESTBOX_REDIS_PASSWORD:+--requirepass "$$TESTBOX_REDIS_PASSWORD"}
     ports:
-      - '6379:6379'
+      - '${TESTBOX_REDIS_PORT:-6379}:6379'
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ['CMD-SHELL', '[ -z "$$TESTBOX_REDIS_PASSWORD" ] || export REDISCLI_AUTH="$$TESTBOX_REDIS_PASSWORD"; redis-cli ping | grep -q PONG']
       interval: 5s
       timeout: 3s
       retries: 10
@@ -18,7 +25,7 @@ services:
       dockerfile: packages/api/Dockerfile
     environment:
       PORT: 3000
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://:${TESTBOX_REDIS_PASSWORD:-}@redis:6379
       TESTBOX_KEY_PREFIX: testbox
       # Share this directory with the macOS worker (see docs/machine-setup.md).
       TESTBOX_DATA_DIR: /data

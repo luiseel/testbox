@@ -34,6 +34,20 @@ describe('queue and execution', () => {
     expect(denied.status).toBe(401);
   });
 
+  it('lets only an admin find a user by name', async () => {
+    const ctx = await boot({ withDaemon: false });
+    open.push(ctx);
+    const alice = await user(ctx, 'alice');
+    const me = await call(ctx, alice.token, 'GET', '/v1/users/me');
+    const found = await call(ctx, ctx.admin, 'GET', `/v1/users?name=${me.json.name as string}`);
+    expect(found.status).toBe(200);
+    expect(found.json.users).toEqual([{ id: alice.id, name: me.json.name, role: 'user' }]);
+    const missing = await call(ctx, ctx.admin, 'GET', '/v1/users?name=nobody');
+    expect(missing.json.users).toEqual([]);
+    const denied = await call(ctx, alice.token, 'GET', '/v1/users?name=nobody');
+    expect(denied.status).toBe(403);
+  });
+
   it('returns no worker when nothing is heartbeating', async () => {
     const ctx = await boot({ withDaemon: false });
     open.push(ctx);

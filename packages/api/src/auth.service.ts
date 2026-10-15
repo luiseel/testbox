@@ -47,6 +47,10 @@ export class AuthService {
     return { id: user.id, role: user.role, name: user.name };
   }
 
+  findUserByName(name: string): Promise<UserRecord | null> {
+    return this.store.findUserByName(name);
+  }
+
   async createUser(name: string, actorId: string): Promise<UserRecord> {
     const existing = await this.store.findUserByName(name);
     if (existing) throw new AppError('CONFLICT', 'user already exists', 409);
