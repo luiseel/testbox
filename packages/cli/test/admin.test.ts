@@ -124,7 +124,7 @@ describe('bootstrap scripts', () => {
 
   it('composes every setup script into valid bash', async () => {
     const names = (await readdir(bootstrapDir())).filter((name) => name.endsWith('.sh') && name !== 'lib.sh');
-    expect(names.sort()).toEqual(['control-plane.sh', 'read-secrets.sh', 'worker.sh']);
+    expect(names.sort()).toEqual(['authorize-key.sh', 'control-plane.sh', 'read-secrets.sh', 'worker.sh']);
     for (const name of names) {
       const script = await composeScript(name.replace(/\.sh$/, ''), { TB_X: 'y' });
       await expect(promisify(execFile)('bash', ['-n', '-c', script])).resolves.toBeDefined();
@@ -265,7 +265,7 @@ describe('testbox admin', () => {
 
       stdout.length = 0;
       expect(await runCli(['admin', 'add-user', 'ana'], io)).toBe(0);
-      expect(stdout.join('')).toMatch(/^testbox login --api-url http:\/\/10\.0\.0\.5:3000 --token tok-\d+\n$/);
+      expect(stdout.join('')).toMatch(/^testbox setup --api-url http:\/\/10\.0\.0\.5:3000 --token tok-\d+\n$/);
       expect(requests.filter((r) => r === 'POST /v1/users')).toHaveLength(1);
     } finally {
       await rm(home, { recursive: true, force: true });

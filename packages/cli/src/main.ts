@@ -3,6 +3,7 @@ import { Command, CommanderError } from 'commander';
 import type { EventEmitter } from 'events';
 import { AdminApp, type AddWorkerFlags, type InitControlPlaneFlags, type UpgradeFlags } from './admin';
 import { TestboxApp, type CliIO } from './commands';
+import { DeveloperApp } from './developer';
 import { defaultSpawn } from './remote';
 
 function defaultPrompt(question: string): Promise<string> {
@@ -11,6 +12,25 @@ function defaultPrompt(question: string): Promise<string> {
     process.stdin.setEncoding('utf8');
     process.stdin.once('data', (data) => resolve(String(data)));
   });
+}
+
+/**
+ * On macOS a write to a pipe is asynchronous, and process.exit() drops what
+ * is still buffered: `testbox verify … | tail` lost the last log lines.
+ * Exit only after both streams have flushed.
+ */
+export function exitAfterFlush(
+  code: number,
+  streams: { write(chunk: string, cb: () => void): boolean }[] = [process.stdout, process.stderr],
+  exit: (code: number) => void = (value) => process.exit(value),
+): void {
+  let pending = streams.length;
+  for (const stream of streams) {
+    stream.write('', () => {
+      pending -= 1;
+      if (pending === 0) exit(code);
+    });
+  }
 }
 
 export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<number> {
@@ -29,6 +49,7 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
   };
   const app = new TestboxApp(full, json);
   const adminApp = new AdminApp(full, json);
+  const developerApp = new DeveloperApp(full, json);
   let code = 0;
   const program = new Command();
   program.exitOverride();
@@ -50,6 +71,30 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
     .option('--ssh-host <host>', 'ssh config host')
     .action(async (opts: { token: string; apiUrl: string; sshHost?: string }) => {
       code = await app.login(opts.token, opts.apiUrl, opts.sshHost);
+    });
+
+  program
+    .command('setup')
+    .description('set up this machine: Mutagen, login, SSH key, then testbox doctor')
+    .requiredOption('--api-url <url>', 'API base URL (from your admin)')
+    .requiredOption('--token <token>', 'API token (from your admin)')
+    .action(async (opts: { apiUrl: string; token: string }) => {
+      code = await developerApp.setup(opts.apiUrl, opts.token);
+    });
+
+  program
+    .command('doctor')
+    .description('check the API, Mutagen, each worker, and the profiles in testbox.yml')
+    .action(async () => {
+      code = await developerApp.doctor();
+    });
+
+  program
+    .command('init')
+    .description('write a starting testbox.yml for this repo')
+    .option('--force', 'replace an existing testbox.yml')
+    .action(async (opts: { force?: boolean }) => {
+      code = await developerApp.init(Boolean(opts.force));
     });
 
   common(program.command('start')).action(async (opts) => {
@@ -145,6 +190,14 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
     });
 
   admin
+    .command('authorize')
+    .description("add a developer's SSH public key to every worker")
+    .argument('<public-key>', 'one line, for example the content of ~/.ssh/id_ed25519.pub')
+    .action(async (publicKey: string) => {
+      code = await adminApp.authorize(publicKey);
+    });
+
+  admin
     .command('add-user')
     .description('create a user (or reuse it) and print a new token for them')
     .argument('<name>', 'lower case, for example ana or ci-bot')
@@ -167,7 +220,7 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
 
 if (require.main === module) {
   runCli(process.argv.slice(2))
-    .then((code) => process.exit(code))
+    .then((code) => exitAfterFlush(code))
     .catch((err: unknown) => {
       process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
       process.exit(1);
