@@ -150,7 +150,7 @@ export class AdminApp {
         this.io.stdout.write(`${JSON.stringify({ type: 'user', name, apiUrl, token })}\n`);
       } else {
         output.info(`token for ${name}. Send this command to them over a private channel:`);
-        this.io.stdout.write(`testbox login --api-url ${apiUrl} --token ${token}\n`);
+        this.io.stdout.write(`testbox setup --api-url ${apiUrl} --token ${token}\n`);
       }
       return ExitCode.Pass;
     } catch (err) {
@@ -267,6 +267,40 @@ export class AdminApp {
         return ExitCode.JobFailed;
       }
       output.info(`updated ${workers.length} worker${workers.length === 1 ? "" : "s"}`);
+      output.summary({ ok: true, exitCode: 0 });
+      return ExitCode.Pass;
+    } catch (err) {
+      return this.fail(output, err);
+    }
+  }
+
+  /** Add a developer's SSH public key to every registered worker. */
+  async authorize(publicKey: string): Promise<number> {
+    const output = this.out();
+    try {
+      const key = publicKey.trim();
+      if (!/^(ssh-|ecdsa-|sk-)\S+ \S+( [^\n]*)?$/.test(key)) {
+        output.error('expected one SSH public key line, for example the content of ~/.ssh/id_ed25519.pub');
+        return ExitCode.JobFailed;
+      }
+      const workers = (await (await this.adminApi()).listWorkers()).filter((worker) => worker.sshHost);
+      let failed = 0;
+      for (const worker of workers) {
+        try {
+          const result = await runBootstrap<{ added: boolean }>({
+            runner: this.io.remote,
+            sshHost: worker.sshHost as string,
+            script: 'authorize-key',
+            env: { TB_PUBLIC_KEY: key },
+            timeoutMs: 60_000,
+          });
+          output.info(`${worker.id}: ${result.added ? 'key added' : 'key was already there'}`);
+        } catch (err) {
+          failed += 1;
+          output.error(`${worker.id}: ${err instanceof Error ? err.message : 'failed'}`);
+        }
+      }
+      if (failed > 0) return ExitCode.JobFailed;
       output.summary({ ok: true, exitCode: 0 });
       return ExitCode.Pass;
     } catch (err) {
