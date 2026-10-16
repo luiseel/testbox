@@ -64,6 +64,8 @@ profiles:
     requires: [macos, xcode]
 ```
 
+For coding agents (Claude Code and others), install the skill: `npx skills add luiseel/testbox`.
+
 `requires` lists worker labels. Labels pick the machine; you never name a host. `worker:<id>` targets one worker.
 
 ## Docs
