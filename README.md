@@ -90,4 +90,5 @@ packages/worker   claim loop, process groups, caches, mise, simulator reset
 packages/cli      commands, per-worker Mutagen sessions, testbox admin
 deploy/           LaunchAgent and systemd templates, install scripts
 deploy/bootstrap  the setup scripts that testbox admin runs over SSH
+skills/testbox    the agent skill (npx skills add luiseel/testbox)
 ```

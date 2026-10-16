@@ -11,15 +11,15 @@ Run `testbox <command> --help` for every option.
 | `setup --api-url URL --token TOKEN` | Installs Mutagen if missing, logs in, makes an SSH key if there is none, then runs `doctor`. |
 | `doctor` | Checks the API, the token, Mutagen, each worker, and the profiles in `testbox.yml`. Prints a fix for each problem. |
 | `init [--force]` | Writes a starting `testbox.yml` for the repo. |
-| `login --api-url URL --token TOKEN` | Stores the API URL and token in `~/.config/testbox/config.json` (mode 0600). |
+| `login --api-url URL --token TOKEN [--ssh-host HOST]` | Stores the API URL and token in `~/.config/testbox/config.json` (mode 0600). |
 | `start` | Creates the workspace and starts the Mutagen sync. |
 | `verify <profile>` | Flush, snapshot, queue, and stream the profile's command. |
-| `run "<command>"` | The same, for any command. |
+| `run "<command>" [--profile NAME]` | The same, for any command. |
 | `status <job-id>`, `logs <job-id> [--follow]`, `cancel <job-id>` | One job. |
 | `artifacts <job-id>` | Downloads the job's artifacts into `./.testbox/<job-id>/`. |
 | `stop` | Stops the sync and deletes the workspace. |
 
-Flags for `verify` and `run`: `--detach` (submit and return the job id), `--timeout <seconds>` (default 1800), `--priority <n>`, `--workspace <id>`, `--json` (NDJSON events and a final summary line). Ctrl-C on a terminal asks whether to cancel or detach; without a terminal it cancels.
+Flags for `verify` and `run`: `--detach` (submit and return the job id), `--timeout <seconds>` (default 1800), `--priority <n>`, `--workspace <id>`, `--direct` (see [Without a control plane](#without-a-control-plane)), `--ssh-host <host>`, `--json` (NDJSON events and a final summary line). `start` takes the same flags. Ctrl-C on a terminal asks whether to cancel or detach; without a terminal it cancels.
 
 ### Admin
 
@@ -27,7 +27,7 @@ Flags for `verify` and `run`: `--detach` (submit and return the job id), `--time
 | --- | --- |
 | `admin init-control-plane <user@ip>` | Installs or updates the API and Redis, writes the secrets, logs you in. |
 | `admin add-worker <user@ip>` | Installs, updates, or repairs a worker, waits for it, runs a test job on it. |
-| `admin upgrade` | Updates the control plane, then every worker. |
+| `admin upgrade [--no-control-plane]` | Updates the control plane, then every worker. With `--no-control-plane`, only the workers. |
 | `admin add-user <name>` | Makes the user if needed, prints a `testbox setup` line with a new token. |
 | `admin authorize '<public key>'` | Adds an SSH public key to every worker. |
 
@@ -36,30 +36,31 @@ Flags for `verify` and `run`: `--detach` (submit and return the job id), `--time
 | Code | Meaning |
 | --- | --- |
 | 0 | job passed |
-| 1 | job failed |
-| 10 | sync error (SSH, Mutagen, snapshot) |
-| 11 | no compatible worker |
-| 12 | timeout |
+| 1 | job failed, or any other error (for example a failed `doctor` check) |
+| 10 | sync error (Mutagen) |
+| 11 | no compatible worker: no worker has the labels, none with the labels sends heartbeats, SSH to the worker fails, or the API answers 503 |
+| 12 | timeout, or the worker stopped during the job (its lease expired) |
 | 13 | cancelled |
-| 20 | auth |
+| 20 | auth (the API answers 401 or 403) |
 
 ## testbox.yml
 
 ```yaml
-project: example-app            # letters, digits, . _ -
+project: example-app            # letters, digits, . _ -; starts with a letter or digit; at most 81 characters
 ignore:                         # not synced; this list replaces the default list
   - .git
   - node_modules
+sshHost: user@10.0.0.5         # optional; only for --direct
 profiles:
   unit:
-    command: pnpm test          # runs with `bash -c` in the repo root on the worker
+    command: pnpm test          # runs with `bash -c` in the repo root on the worker (`cmd` also works)
     resources: light            # light (default) or exclusive
     requires: [linux]           # worker labels; all must match
     artifacts:                  # globs to upload; get them with `testbox artifacts`
       - coverage/**
 ```
 
-The CLI finds `testbox.yml` in the current directory or a parent. The default `ignore` list is `node_modules`, `.next`, `.git`, `.env`, `.env.*`, `dist`, `build`, `coverage`, `DerivedData`, `.turbo`, `.testbox`.
+The CLI finds `testbox.yml` in the current directory or a parent. It ignores unknown keys. The default `ignore` list is `node_modules`, `.next`, `.git`, `.env`, `.env.*`, `dist`, `build`, `coverage`, `DerivedData`, `.turbo`, `.testbox`.
 
 An `exclusive` job takes the worker alone. On a Mac, the worker shuts down and erases all simulators before an exclusive job (`xcrun simctl shutdown all`, `erase all`).
 
@@ -72,8 +73,9 @@ A worker finds these labels itself:
 | `macos` or `linux`, `arm64` or `x64` | always |
 | `node` | always |
 | `pnpm`, `mise` | when they are on the worker's `PATH` |
-| `browser` | when Chrome, Chromium, Firefox, or Edge is installed |
-| `xcode`, `xcode-<version>`, `ios-simulator` | on a Mac with Xcode and `simctl` |
+| `browser` | when `google-chrome`, `google-chrome-stable`, `chromium`, `chromium-browser`, `firefox`, or `microsoft-edge` is on the login shell's `PATH` (an app in `/Applications` only is not found) |
+| `xcode`, `xcode-<version>` | when `xcodebuild -version` works |
+| `ios-simulator` | when `xcrun simctl help` works |
 | `worker:<id>` | always; targets one worker |
 
 Add more with `testbox admin add-worker --labels a,b`, `TESTBOX_LABELS`, or `labels:` in `~/testbox/worker.yml`.
@@ -89,11 +91,11 @@ A worker is healthy while its heartbeat is newer than 15 s (`TESTBOX_HEARTBEAT_T
 
 When several workers qualify, the one that last ran this workspace wins, so its warm caches are used. Higher priority runs first; equal priority is first in, first out.
 
-If no registered worker can ever match the labels, the submit fails at once (exit 11). A matching worker that is busy or down for a short time does not fail the submit: the job waits.
+Before it submits, `verify` asks the API for a worker. If no healthy worker has the labels, the submit fails at once (exit 11). After the submit, the job is pinned to that worker; when the worker is busy, the job waits.
 
-Latest wins: a newer queued job for the same user, workspace, and profile cancels the older queued one. A running job is never cancelled by a newer submit.
+Latest wins: a newer queued job for the same user, workspace, and profile cancels the older queued one. This applies only to jobs with a profile; `run "<command>"` jobs without `--profile` do not cancel each other. A running job is never cancelled by a newer submit.
 
-Job states: `queued → assigned → running → succeeded | failed | cancelled | timed_out`. The worker renews a lease (30 s) while it runs a job. When a worker stops, its lease expires and the job fails. No other worker runs it again.
+Job states: `queued → assigned → running → succeeded | failed | cancelled | timed_out`. The worker renews a lease (30 s) while it runs a job. When a worker stops, its lease expires and the job goes to `timed_out` (exit 12). No other worker runs it again. A worker that cannot renew its lease stops the command.
 
 ## Sync and snapshots
 
@@ -103,13 +105,14 @@ Job states: `queued → assigned → running → succeeded | failed | cancelled 
 
 1. Checks the snapshot digest.
 2. With `mise.toml`, `.mise.toml`, or `.tool-versions` in the snapshot (and `mise` on the worker): runs `mise install` with `MISE_YES=1` and `MISE_TRUSTED_CONFIG_PATHS=<data dir>`. A failure fails the job before the command runs.
-3. With `package.json` and `pnpm-lock.yaml`: links warm `node_modules` from the cache, or runs `pnpm install --frozen-lockfile` and stores the result. The cache key hashes the lockfiles (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `Podfile.lock`, `Package.resolved`), the Node version, the arch, and `xcodebuild -version`.
-4. Runs the command in its own process group, under `mise exec --` when step 2 ran. On cancel or timeout: SIGTERM to the group, then SIGKILL.
-5. Uploads the artifacts to the API.
+3. With `package.json` and `pnpm-lock.yaml`: links warm `node_modules` from this workspace's cache, or runs `pnpm install --frozen-lockfile` (with a shared `pnpm-store`) and stores the result. The cache key hashes the lockfiles (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `Podfile.lock`, `Package.resolved`, up to 6 directories deep), the Node version, the platform, the arch, and `xcodebuild -version`.
+4. For an `exclusive` job on a Mac: resets the simulators. If `simctl erase all` fails, the job fails.
+5. Runs the command in its own process group, under `mise exec --` when step 2 ran. On cancel or timeout: SIGTERM to the group, then SIGKILL.
+6. Uploads the artifacts to the API, also when the job failed. It skips files larger than 50 MB. A failed upload fails the job.
 
-The job's environment has only `PATH`, `HOME`, `LANG`, `TERM`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `NODE_OPTIONS`, `PNPM_HOME`, `DEVELOPER_DIR`, `SSH_AUTH_SOCK`, `XPC_SERVICE_NAME`, `DISPLAY`, and `TESTBOX_JOB_ID`. Secrets of the worker are masked in the log.
+The job's environment has only `PATH`, `HOME`, `LANG`, `TERM`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `NODE_OPTIONS`, `PNPM_HOME`, `DEVELOPER_DIR`, `SSH_AUTH_SOCK`, `XPC_SERVICE_NAME`, `DISPLAY`, and `TESTBOX_JOB_ID`, plus `MISE_YES` and `MISE_TRUSTED_CONFIG_PATHS` when step 2 ran. The log masks the worker token, the bootstrap token, the Redis password, `Bearer …` values, and `token=`, `password=`, `secret=`, `api_key=`, `authorization=` values.
 
-Snapshots, logs, and artifacts are deleted after 7 days. Workspaces and caches are kept.
+The API deletes job records, logs, and artifacts on the control plane after 7 days. Workers do not delete their snapshots (`~/testbox/snapshots`) or job logs (`~/testbox/logs`) yet. Workspaces and caches are kept.
 
 ## Settings
 
@@ -121,9 +124,9 @@ Snapshots, logs, and artifacts are deleted after 7 days. Workspaces and caches a
 | `TESTBOX_BOOTSTRAP_TOKEN` | random | the admin token |
 | `TESTBOX_REDIS_PASSWORD` | random | empty means no password (local development only) |
 | `TESTBOX_API_PORT`, `TESTBOX_REDIS_PORT` | 3000, 6379 | host ports |
-| `TESTBOX_DATA_DIR` | `~/testbox` | artifacts and logs of the API |
+| `TESTBOX_DATA_DIR` | `~/testbox` (written by `init-control-plane`) | artifacts and logs of the API; mounted at `/data` in the container |
 
-The API also reads `TESTBOX_LEASE_MS` (30000), `TESTBOX_HEARTBEAT_TTL_MS` (15000), `TESTBOX_SWEEPER_MS` (5000), and `TESTBOX_RETENTION_MS` (7 days).
+The API code also reads `TESTBOX_HEARTBEAT_TTL_MS` (15000), `TESTBOX_SWEEPER_MS` (5000), and `TESTBOX_RETENTION_MS` (7 days), but `docker-compose.yml` does not pass them to the container, so a value in `.env` has no effect. The worker uses a fixed lease of 30 s and a fixed heartbeat TTL of 15 s.
 
 ### Worker (in the LaunchAgent or systemd unit that `add-worker` writes)
 
@@ -137,6 +140,7 @@ The API also reads `TESTBOX_LEASE_MS` (30000), `TESTBOX_HEARTBEAT_TTL_MS` (15000
 | `TESTBOX_CAPACITY` | jobs at the same time |
 | `TESTBOX_LABELS` | extra labels, comma-separated |
 | `TESTBOX_DATA_DIR` | `~/testbox` |
+| `TESTBOX_WORKER_CONFIG` | path to a `worker.yml` (default `~/testbox/worker.yml`; with this variable the file must exist) |
 
 ### Developer (`~/.config/testbox/config.json`)
 
@@ -144,4 +148,4 @@ The API also reads `TESTBOX_LEASE_MS` (30000), `TESTBOX_HEARTBEAT_TTL_MS` (15000
 
 ## Without a control plane
 
-With no API URL in the config, `run` and `verify` run over SSH in the synced tree of `--ssh-host`. This is for bringing up a single machine. It has the same exit codes, but no queue and no snapshot.
+With `--direct`, `start`, `run`, and `verify` do not use the API: they sync to the host in `--ssh-host` (or `sshHost` in `testbox.yml` or the config) and run the command over SSH in the synced tree. This is for bringing up a single machine. It has the same exit codes, but no queue and no snapshot. Without `--direct`, the CLI needs a login (exit 20).

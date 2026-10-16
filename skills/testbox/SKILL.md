@@ -22,7 +22,7 @@ testbox run "<command>" --json         # any command, same flow
 
 - Always pass `--json`. It prints NDJSON events and a final summary line, in one ordered stream. Without it, stdout and stderr can arrive out of order through a pipe.
 - The default timeout is 1800 s. Set the Bash tool timeout to match, or use `--timeout <seconds>`. For long jobs, use `--detach` (prints the job id), then `testbox logs <job-id> --follow` or `testbox status <job-id>`.
-- Never run two `verify` calls for the same profile at once: a newer queued job cancels the older queued one.
+- Never run two `verify` calls for the same profile at once: a newer queued job cancels the older queued one (exit 13).
 - Artifacts: `testbox artifacts <job-id>` downloads them into `./.testbox/<job-id>/`.
 - `testbox cancel <job-id>` stops a job.
 
@@ -32,9 +32,9 @@ testbox run "<command>" --json         # any command, same flow
 | --- | --- | --- |
 | 0 | job passed | done |
 | 1 | job failed | a real build or test failure: read the log and fix the code |
-| 10 | sync error (SSH, Mutagen, snapshot) | infrastructure: run `testbox doctor` |
-| 11 | no worker has all labels in `requires` | fix `requires`, or tell the user a worker with that label is needed |
-| 12 | timeout | raise `--timeout`, or find the hang |
+| 10 | sync error (Mutagen) | infrastructure: run `testbox doctor` |
+| 11 | no usable worker: none has all labels in `requires`, none with them is up, or SSH to it fails | run `testbox doctor`; if the labels are wrong, fix `requires` |
+| 12 | timeout, or the worker stopped during the job (`lease_expired`) | raise `--timeout` or find the hang; for `lease_expired`, run `testbox doctor` |
 | 13 | cancelled | someone cancelled it, or a newer submit replaced it |
 | 20 | auth | the token is wrong; the user must ask an admin for a new `testbox setup` line |
 

@@ -32,7 +32,7 @@ It does these steps:
 5. From the admin machine, checks `http://<ip>:3000/v1/healthz`.
 6. Saves the host in `~/.config/testbox/admin.json`, makes your user, and logs you in.
 
-Options: `--address` (when `<ip>` is not in the SSH host), `--api-port`, `--redis-port`, `--ref <branch>`, `--user <name>`.
+Options: `--address` (when `<ip>` is not in the SSH host), `--api-port`, `--redis-port` (first run only; later, edit `.env`), `--ref <branch>`, `--user <name>`, `--git-url <url>`, `--repo-dir <dir>`, `--data-dir <dir>`.
 
 The host must accept TCP 3000 (API) from developers and workers, and TCP 6379 (Redis, with a password) from workers only. The secrets stay on the control-plane host; the CLI reads them over SSH when it needs them.
 
@@ -51,9 +51,9 @@ It does these steps:
 5. Waits for the worker's first heartbeat.
 6. Runs a real job that only this worker can take (it requires the label `worker:<id>`), and prints `testbox ok on <host>`.
 
-Options: `--id <id>` (default `<short hostname>-1`), `--labels gpu,big-disk` (extra labels), `--capacity <n>` (jobs at the same time, default 1), `--address`, `--ref`, `--no-smoke`.
+Options: `--id <id>` (default `<short hostname>-1`, lower case), `--labels gpu,big-disk` (extra labels), `--capacity <n>` (jobs at the same time, default 1), `--address`, `--ref`, `--git-url`, `--repo-dir`, `--data-dir`, `--wait <seconds>` (for the first heartbeat, default 600), `--no-smoke`. When you are not logged in to this control plane, it skips the test job.
 
-The worker finds its own labels: the OS (`macos` or `linux`), the arch, `node`, `pnpm`, `mise`, `browser`, `worker:<id>`, and on a Mac `xcode`, `xcode-<version>`, and `ios-simulator`.
+The worker finds its own labels: the OS (`macos` or `linux`), the arch, `node`, `pnpm`, `mise`, `browser`, `worker:<id>`, and on a Mac `xcode`, `xcode-<version>`, and `ios-simulator` (see [Labels](reference.md#labels)).
 
 ### macOS workers
 
@@ -109,7 +109,7 @@ Do not add Redis (6379): only workers use it, and they are on the LAN.
 testbox admin upgrade          # the control plane, then every worker
 ```
 
-It fast-forwards each checkout to `main` (or `--ref <branch>`), rebuilds, restarts, and waits for each worker. A worker whose service config must change (a new Redis password, labels, or capacity) needs `testbox admin add-worker` again.
+It fast-forwards each checkout to `main` (or `--ref <branch>`), rebuilds, restarts, and waits for each worker. `--no-control-plane` updates the workers only. A worker whose service config must change (a new Redis password, labels, or capacity) needs `testbox admin add-worker` again.
 
 To update the CLI: `git pull`, then `./scripts/install-cli.sh`.
 
@@ -124,7 +124,8 @@ To update the CLI: `git pull`, then `./scripts/install-cli.sh`.
 | worker | `~/testbox/app` | the checkout (or a link to it) |
 | worker | `~/testbox/bin` | `node`, `flock`, `mise` for the service and SSH |
 | worker | `~/testbox/workspaces`, `snapshots`, `cache` | synced trees, job copies, warm dependencies |
-| worker | `~/testbox/logs/worker.stderr.log` | the macOS worker log (Linux: `journalctl --user -u testbox-worker`) |
+| worker | `~/testbox/logs/worker.stderr.log`, `worker.stdout.log` | the macOS worker log (Linux: `journalctl --user -u testbox-worker`) |
+| worker | `~/testbox/worker.yml` | optional extra `labels:` |
 
 ## Remove a worker
 
