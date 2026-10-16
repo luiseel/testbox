@@ -66,6 +66,7 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
 
   program
     .command('login')
+    .description('store the API URL and token (testbox setup does this for you)')
     .requiredOption('--token <token>', 'API token')
     .requiredOption('--api-url <url>', 'API base URL')
     .option('--ssh-host <host>', 'ssh config host')
@@ -97,25 +98,34 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
       code = await developerApp.init(Boolean(opts.force));
     });
 
-  common(program.command('start')).action(async (opts) => {
+  common(program.command('start').description('start syncing this repo to the workers'))
+    .action(async (opts) => {
     code = await app.start(opts);
   });
 
-  program.command('stop').action(async () => {
+  program.command('stop').description('stop syncing this repo').action(async () => {
     code = await app.stop();
   });
 
-  common(program.command('run').argument('<command>', 'command to run').option('--profile <name>', 'profile name'))
+  common(
+    program
+      .command('run')
+      .description('run a command on a worker')
+      .argument('<command>', 'command to run')
+      .option('--profile <name>', 'profile name'),
+  )
     .action(async (command: string, opts) => {
       code = await app.run(command, opts);
     });
 
-  common(program.command('verify').argument('<profile>', 'profile from testbox.yml')).action(async (profile: string, opts) => {
+  common(program.command('verify').description('run a profile from testbox.yml on a worker').argument('<profile>', 'profile from testbox.yml'))
+    .action(async (profile: string, opts) => {
     code = await app.verify(profile, opts);
   });
 
   program
     .command('status')
+    .description('show the state of a job')
     .argument('<job-id>')
     .action(async (jobId: string) => {
       code = await app.status(jobId);
@@ -123,6 +133,7 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
 
   program
     .command('logs')
+    .description('print the log of a job')
     .argument('<job-id>')
     .option('--follow', 'stream until the job finishes')
     .action(async (jobId: string, opts: { follow?: boolean }) => {
@@ -131,6 +142,7 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
 
   program
     .command('cancel')
+    .description('cancel a job')
     .argument('<job-id>')
     .action(async (jobId: string) => {
       code = await app.cancel(jobId);
@@ -138,6 +150,7 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
 
   program
     .command('artifacts')
+    .description('download the artifacts of a job into .testbox/<job-id>/')
     .argument('<job-id>')
     .action(async (jobId: string) => {
       code = await app.artifacts(jobId);
