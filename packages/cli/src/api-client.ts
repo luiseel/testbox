@@ -70,6 +70,27 @@ export class HttpApi {
     return this.request('GET', '/v1/users/me');
   }
 
+  findUser(name: string): Promise<{ users: { id: string; name: string; role: string }[] }> {
+    return this.request('GET', `/v1/users?name=${encodeURIComponent(name)}`);
+  }
+
+  createUser(name: string): Promise<{ id: string; name: string }> {
+    return this.request('POST', '/v1/users', { name });
+  }
+
+  issueToken(userId: string): Promise<{ token: string; userId: string }> {
+    return this.request('POST', `/v1/users/${encodeURIComponent(userId)}/tokens`);
+  }
+
+  async healthy(): Promise<boolean> {
+    try {
+      await this.request('GET', '/v1/healthz');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   createWorkspace(project: string): Promise<{ id: string; stagingRel: string; project: string; ownerId: string }> {
     return this.request('POST', '/v1/workspaces', { project });
   }
@@ -131,8 +152,11 @@ export class HttpApi {
     };
   }
 
-  async listWorkers(): Promise<{ id: string; healthy: boolean; labels: string[] }[]> {
-    const body = await this.request<{ workers: { id: string; healthy: boolean; labels: string[] }[] }>('GET', '/v1/workers');
+  async listWorkers(): Promise<{ id: string; healthy: boolean; labels: string[]; sshHost?: string | null }[]> {
+    const body = await this.request<{ workers: { id: string; healthy: boolean; labels: string[]; sshHost?: string | null }[] }>(
+      'GET',
+      '/v1/workers',
+    );
     return body.workers;
   }
 

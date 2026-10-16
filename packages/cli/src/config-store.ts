@@ -73,3 +73,34 @@ export async function writeWorkspaceState(dir: string, state: WorkspaceState): P
 export async function removeWorkspaceState(dir: string): Promise<void> {
   await rm(workspaceStatePath(dir), { force: true });
 }
+
+/** What `testbox admin` remembers about the fleet. Secrets stay on the control-plane host. */
+export interface AdminConfig {
+  controlPlane?: {
+    sshHost: string;
+    address: string;
+    apiPort: number;
+    redisPort: number;
+    repoDir: string;
+  };
+}
+
+export function adminConfigPath(homeDir: string): string {
+  return path.join(homeDir, '.config', 'testbox', 'admin.json');
+}
+
+export async function readAdminConfig(homeDir: string): Promise<AdminConfig> {
+  try {
+    return JSON.parse(await readFile(adminConfigPath(homeDir), 'utf8')) as AdminConfig;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    throw err;
+  }
+}
+
+export async function writeAdminConfig(homeDir: string, config: AdminConfig): Promise<void> {
+  const file = adminConfigPath(homeDir);
+  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+  await writeFile(file, JSON.stringify(config, null, 2), { mode: 0o600 });
+  await chmod(file, 0o600);
+}

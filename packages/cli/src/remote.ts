@@ -18,13 +18,25 @@ export interface CommandResult {
   timedOut?: boolean;
 }
 
-export interface RemoteRunner {
-  run(file: string, args: string[], opts?: { timeoutMs?: number }): Promise<CommandResult>;
+export interface RunOptions {
+  timeoutMs?: number;
+  /** Written to stdin, then stdin is closed. Without it, stdin is /dev/null. */
+  input?: string;
+  /** Called with each stderr chunk as it arrives, for progress output. */
+  onStderr?: (text: string) => void;
 }
 
-export function defaultSpawn(file: string, args: string[], opts?: { timeoutMs?: number }): Promise<CommandResult> {
+export interface RemoteRunner {
+  run(file: string, args: string[], opts?: RunOptions): Promise<CommandResult>;
+}
+
+export function defaultSpawn(file: string, args: string[], opts?: RunOptions): Promise<CommandResult> {
   return new Promise((resolve) => {
-    const child = spawn(file, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(file, args, { stdio: [opts?.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
+    if (opts?.input !== undefined) {
+      child.stdin?.on('error', () => undefined);
+      child.stdin?.end(opts.input);
+    }
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -47,6 +59,7 @@ export function defaultSpawn(file: string, args: string[], opts?: { timeoutMs?: 
     });
     child.stderr?.on('data', (chunk: Buffer) => {
       stderr += chunk.toString();
+      opts?.onStderr?.(chunk.toString());
     });
     child.once('error', (err) => finish({ code: null, stdout, stderr: `${stderr}${err.message}`, timedOut }));
     child.once('exit', (code) => finish({ code, stdout, stderr, timedOut }));
@@ -159,7 +172,9 @@ export class MutagenSsh {
       quoteShellArg(opts.snapshotId),
     ];
     for (const pattern of opts.ignore) args.push('--ignore', quoteShellArg(pattern));
-    const script = `node ${args.join(' ')}`;
+    // The worker setup links node and flock into <data dir>/bin; an SSH
+    // command does not read shell profiles, so put it first on PATH.
+    const script = `PATH="$HOME/${dataRel}/bin:$PATH" node ${args.join(' ')}`;
     const result = await this.ssh(`bash -c ${quoteShellArg(script)}`);
     if (result.code !== 0) throw new SyncError(result.stderr || 'snapshot failed');
     return JSON.parse(result.stdout) as { digest: string; relPath: string };

@@ -62,9 +62,12 @@ export class Daemon {
   private readonly running = new Set<Promise<void>>();
   private readonly simulator: SimulatorControl;
   private readonly env: NodeJS.ProcessEnv;
+  private lastRedisError = '';
+  private lastRedisErrorAt = 0;
 
   constructor(private readonly opts: DaemonOptions) {
     this.redis = new IORedis(opts.redisUrl, { maxRetriesPerRequest: null });
+    this.redis.on('error', (err: Error) => this.redisError(err));
     this.store = new JobStore(this.redis, opts.keyPrefix);
     this.simulator = opts.simulator ?? simulatorForPlatform();
     this.env = opts.env ?? process.env;
@@ -397,6 +400,7 @@ export class Daemon {
 
   private async subscribe(): Promise<void> {
     this.sub = new IORedis(this.opts.redisUrl, { maxRetriesPerRequest: null });
+    this.sub.on('error', (err: Error) => this.redisError(err));
     await this.sub.subscribe(this.store.k('events'));
     this.sub.on('message', (_channel: string, message: string) => {
       let event: JobEvent;
@@ -412,6 +416,21 @@ export class Daemon {
         this.wake?.();
       }
     });
+  }
+
+  /**
+   * ioredis reconnects by itself. Without a listener it prints a stack trace
+   * for each attempt; print one line, and again only when the error changes
+   * or a minute has passed.
+   */
+  private redisError(err: Error): void {
+    // The local port in "connect EHOSTUNREACH a:6379 - Local (b:56921)" changes on each try.
+    const message = err.message.replace(/ - Local \(.*\)$/, '');
+    const now = Date.now();
+    if (message === this.lastRedisError && now - this.lastRedisErrorAt < 60_000) return;
+    this.lastRedisError = message;
+    this.lastRedisErrorAt = now;
+    process.stderr.write(`redis: ${message}\n`);
   }
 
   private async requireJob(id: string): Promise<JobRecord> {
