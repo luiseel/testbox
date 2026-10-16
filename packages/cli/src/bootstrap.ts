@@ -43,11 +43,12 @@ export function parseResult<T>(stdout: string): T {
   return JSON.parse(line.slice('TESTBOX_RESULT '.length)) as T;
 }
 
-/** Last `error:` line, or the last line of stderr, so the user sees why. */
+/** Last `error:` line, or the last two lines of stderr, so the user sees why. */
 export function failureReason(stderr: string, fallback: string): string {
   const lines = stderr.split('\n').map((line) => line.trim()).filter(Boolean);
   const error = [...lines].reverse().find((line) => line.startsWith('error: '));
-  return error ? error.slice('error: '.length) : lines.at(-1) ?? fallback;
+  if (error) return error.slice('error: '.length);
+  return lines.slice(-2).join(' / ') || fallback;
 }
 
 export async function runBootstrap<T>(opts: {

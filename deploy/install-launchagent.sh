@@ -12,6 +12,7 @@ WORKER_ID="${TESTBOX_WORKER_ID:-$(hostname -s)-1}"
 WORKER_TOKEN="${TESTBOX_WORKER_TOKEN:-}"
 SSH_HOST="${TESTBOX_SSH_HOST:-testbox@$(hostname -s)}"
 CAPACITY="${TESTBOX_CAPACITY:-1}"
+LABELS="${TESTBOX_LABELS:-}"
 TEMPLATE="$REPO/deploy/com.testbox.worker.plist.template"
 DEST="${HOME}/Library/LaunchAgents/com.testbox.worker.plist"
 
@@ -36,10 +37,29 @@ sed \
   -e "s|__WORKER_TOKEN__|$WORKER_TOKEN|g" \
   -e "s|__SSH_HOST__|$SSH_HOST|g" \
   -e "s|__CAPACITY__|$CAPACITY|g" \
+  -e "s|__LABELS__|$LABELS|g" \
   "$TEMPLATE" > "$DEST"
+# The plist holds the worker token and the Redis password.
+chmod 600 "$DEST"
 
-launchctl bootout "gui/$(id -u)/com.testbox.worker" >/dev/null 2>&1 || true
-launchctl bootstrap "gui/$(id -u)" "$DEST"
+SERVICE="gui/$(id -u)/com.testbox.worker"
+launchctl bootout "$SERVICE" >/dev/null 2>&1 || true
+# bootout returns before launchd has removed the job; bootstrap fails with
+# "5: Input/output error" until it is gone.
+i=0
+while launchctl print "$SERVICE" >/dev/null 2>&1 && [ "$i" -lt 20 ]; do
+  sleep 0.5
+  i=$((i + 1))
+done
+i=0
+until launchctl bootstrap "gui/$(id -u)" "$DEST"; do
+  i=$((i + 1))
+  if [ "$i" -ge 5 ]; then
+    echo "launchctl bootstrap failed; is $(id -un) logged in to the GUI?" >&2
+    exit 1
+  fi
+  sleep 1
+done
 launchctl enable "gui/$(id -u)/com.testbox.worker"
 launchctl kickstart -k "gui/$(id -u)/com.testbox.worker"
 echo "installed $DEST"

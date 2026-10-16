@@ -7,7 +7,7 @@ import { promisify } from 'util';
 import { describe, expect, it } from 'vitest';
 import { buildMutagenCreateArgs, buildSshArgs, remoteBash } from '@testbox/shared';
 import { attachInterrupt } from '../src/interrupt';
-import { runCli } from '../src/main';
+import { exitAfterFlush, runCli } from '../src/main';
 import { runtimeProbeScript, type CommandResult, type RemoteRunner } from '../src/remote';
 
 const exec = promisify(execFile);
@@ -19,6 +19,19 @@ describe('runtime probe', () => {
     expect(parsed.nodeVersion.startsWith('v')).toBe(true);
     expect(parsed.arch.length).toBeGreaterThan(0);
     expect(parsed.xcodeVersion === null || parsed.xcodeVersion.includes('Xcode')).toBe(true);
+  });
+});
+
+describe('exit', () => {
+  it('exits only after stdout and stderr have flushed', () => {
+    const callbacks: (() => void)[] = [];
+    const stream = { write: (_chunk: string, cb: () => void) => (callbacks.push(cb), false) };
+    const exits: number[] = [];
+    exitAfterFlush(3, [stream, stream], (code) => exits.push(code));
+    callbacks[0]?.();
+    expect(exits).toEqual([]);
+    callbacks[1]?.();
+    expect(exits).toEqual([3]);
   });
 });
 

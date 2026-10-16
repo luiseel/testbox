@@ -1,3 +1,7 @@
+# A fixed project name, so the containers and the Redis volume are the same
+# whatever the checkout folder is called.
+name: testbox
+
 services:
   redis:
     image: redis:7-alpine
@@ -27,7 +31,7 @@ services:
       PORT: 3000
       REDIS_URL: redis://:${TESTBOX_REDIS_PASSWORD:-}@redis:6379
       TESTBOX_KEY_PREFIX: testbox
-      # Share this directory with the macOS worker (see docs/machine-setup.md).
+      # Artifacts and logs that workers upload (see docs/reference.md).
       TESTBOX_DATA_DIR: /data
       TESTBOX_WORKER_TOKEN: ${TESTBOX_WORKER_TOKEN:-dev-worker-token}
       # Admin token used to create users and mint their tokens (POST /v1/users, /v1/users/:id/tokens).

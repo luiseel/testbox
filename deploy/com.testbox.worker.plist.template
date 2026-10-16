@@ -27,8 +27,10 @@
     <string>__SSH_HOST__</string>
     <key>TESTBOX_CAPACITY</key>
     <string>__CAPACITY__</string>
+    <key>TESTBOX_LABELS</key>
+    <string>__LABELS__</string>
     <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <string>__DATA_DIR__/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
