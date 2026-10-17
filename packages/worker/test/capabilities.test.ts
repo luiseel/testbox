@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { capabilityLabels, detectBrowser, xcodeLabels } from '../src/capabilities';
 import { probeRuntime } from '../src/probe';
-import { simulatorForPlatform } from '../src/simulator';
 
 describe('worker capabilities', () => {
   it('detects linux and x64 without Xcode or the simulator', async () => {
@@ -17,8 +16,6 @@ describe('worker capabilities', () => {
     expect(labels).toEqual(['linux', 'x64', 'node', 'pnpm', 'browser', 'gpu']);
     expect(labels).not.toContain('xcode');
     expect(labels).not.toContain('ios-simulator');
-    expect(simulatorForPlatform('linux').enabled).toBe(false);
-    expect(simulatorForPlatform('darwin').enabled).toBe(true);
     if (process.platform !== 'darwin') {
       expect((await probeRuntime()).xcodeVersion).toBeNull();
       expect(await detectBrowser(async () => false)).toBe(false);

@@ -104,7 +104,6 @@ export class TestboxApp {
         stagingRel = created.stagingRel;
         const selected = await this.api(user).selectWorker({
           requires: [],
-          resources: 'light',
           workspaceId: id,
         });
         if (selected?.sshHost) {
@@ -286,7 +285,6 @@ export class TestboxApp {
       if (!flags.direct && user) {
         const selected = await this.api(user).selectWorker({
           requires: profile?.requires ?? [],
-          resources: profile?.resources ?? 'light',
           workspaceId: state.id,
         });
         if (selected?.sshHost) {
@@ -332,7 +330,6 @@ export class TestboxApp {
         snapshotId,
         command,
         profile: profileName,
-        resources: profile?.resources ?? 'light',
         artifactGlobs: profile?.artifacts ?? [],
         requires: profile?.requires ?? [],
         priority: flags.priority ? Number(flags.priority) : 0,

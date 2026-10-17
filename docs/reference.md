@@ -54,7 +54,6 @@ sshHost: user@10.0.0.5         # optional; only for --direct
 profiles:
   unit:
     command: pnpm test          # runs with `bash -c` in the repo root on the worker (`cmd` also works)
-    resources: light            # light (default) or exclusive
     requires: [linux]           # worker labels; all must match
     artifacts:                  # globs to upload; get them with `testbox artifacts`
       - coverage/**
@@ -62,7 +61,7 @@ profiles:
 
 The CLI finds `testbox.yml` in the current directory or a parent. It ignores unknown keys. The default `ignore` list is `node_modules`, `.next`, `.git`, `.env`, `.env.*`, `dist`, `build`, `coverage`, `DerivedData`, `.turbo`, `.testbox`.
 
-An `exclusive` job takes the worker alone. On a Mac, the worker shuts down and erases all simulators before an exclusive job (`xcrun simctl shutdown all`, `erase all`).
+Testbox does not reset or erase simulators. Other jobs, CI runners, or people can use the same Mac. A job that needs a clean simulator makes its own (`xcrun simctl create`) and deletes it at the end.
 
 ## Labels
 
@@ -86,8 +85,6 @@ A worker is healthy while its heartbeat is newer than 15 s (`TESTBOX_HEARTBEAT_T
 
 - has every required label
 - has a free slot (`TESTBOX_CAPACITY`, default 1)
-- is not running an `exclusive` job
-- is idle, when this job is `exclusive`
 
 When several workers qualify, the one that last ran this workspace wins, so its warm caches are used. Higher priority runs first; equal priority is first in, first out.
 
@@ -106,9 +103,8 @@ Job states: `queued → assigned → running → succeeded | failed | cancelled 
 1. Checks the snapshot digest.
 2. With `mise.toml`, `.mise.toml`, or `.tool-versions` in the snapshot (and `mise` on the worker): runs `mise install` with `MISE_YES=1` and `MISE_TRUSTED_CONFIG_PATHS=<data dir>`. A failure fails the job before the command runs.
 3. With `package.json` and `pnpm-lock.yaml`: links warm `node_modules` from this workspace's cache, or runs `pnpm install --frozen-lockfile` (with a shared `pnpm-store`) and stores the result. The cache key hashes the lockfiles (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `Podfile.lock`, `Package.resolved`, up to 6 directories deep), the Node version, the platform, the arch, and `xcodebuild -version`.
-4. For an `exclusive` job on a Mac: resets the simulators. If `simctl erase all` fails, the job fails.
-5. Runs the command in its own process group, under `mise exec --` when step 2 ran. On cancel or timeout: SIGTERM to the group, then SIGKILL.
-6. Uploads the artifacts to the API, also when the job failed. It skips files larger than 50 MB. A failed upload fails the job.
+4. Runs the command in its own process group, under `mise exec --` when step 2 ran. On cancel or timeout: SIGTERM to the group, then SIGKILL.
+5. Uploads the artifacts to the API, also when the job failed. It skips files larger than 50 MB. A failed upload fails the job.
 
 The job's environment has only `PATH`, `HOME`, `LANG`, `TERM`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `NODE_OPTIONS`, `PNPM_HOME`, `DEVELOPER_DIR`, `SSH_AUTH_SOCK`, `XPC_SERVICE_NAME`, `DISPLAY`, and `TESTBOX_JOB_ID`, plus `MISE_YES` and `MISE_TRUSTED_CONFIG_PATHS` when step 2 ran. The log masks the worker token, the bootstrap token, the Redis password, `Bearer …` values, and `token=`, `password=`, `secret=`, `api_key=`, `authorization=` values.
 

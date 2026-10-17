@@ -72,7 +72,6 @@ function baseJob(prefix: string, patch: Partial<JobRecord> = {}): JobRecord {
     ownerId: 'usr_test',
     command: 'true',
     profile,
-    resources: 'light',
     artifactGlobs: [],
     requires: [],
     priority: 0,

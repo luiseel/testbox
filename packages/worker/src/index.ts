@@ -1,8 +1,6 @@
 export { runCommand, killProcessGroup, processStillOwnsJob } from './executor';
 export { buildJobEnv, secretsFromEnv } from './env';
 export { collectArtifacts } from './artifacts';
-export { simulatorForPlatform, MacOSSimulatorControl } from './simulator';
-export type { SimulatorControl } from './simulator';
 export { probeRuntime } from './probe';
 export { capabilityLabels, osLabel, archLabel, xcodeLabels, commandOnPath, detectBrowser, hasIosSimulator } from './capabilities';
 export { Daemon, startDaemon } from './daemon';

@@ -229,7 +229,6 @@ interface DetectedProfile {
   name: string;
   command: string;
   requires: string[];
-  resources: 'light' | 'exclusive';
   note?: string;
 }
 
@@ -261,7 +260,7 @@ export async function detectProfiles(root: string): Promise<{ profiles: Detected
       const pkg = JSON.parse(await readFile(path.join(abs, 'package.json'), 'utf8')) as { scripts?: Record<string, string> };
       if (pkg.scripts?.test) {
         const runner = (await has('pnpm-lock.yaml')) ? 'pnpm test' : (await has('yarn.lock')) ? 'yarn test' : 'npm test';
-        found.push({ kind: 'test', command: `${prefix}${runner}`, requires: toolchain, resources: 'light' });
+        found.push({ kind: 'test', command: `${prefix}${runner}`, requires: toolchain });
         ignore.add(dir ? `${dir}/node_modules` : 'node_modules').add(dir ? `${dir}/dist` : 'dist');
       }
     }
@@ -270,14 +269,13 @@ export async function detectProfiles(root: string): Promise<{ profiles: Detected
         kind: 'gradle',
         command: `${prefix}./gradlew --no-daemon test`,
         requires: toolchain,
-        resources: 'light',
         note: mise ? undefined : 'needs Java on the worker; pin it in mise.toml and require mise',
       });
       for (const out of ['.gradle', 'build', 'bin']) ignore.add(dir ? `${dir}/${out}` : out);
     }
     if (await has('Package.swift')) {
       // Swift Build hangs in a LaunchAgent session; the native build system does not.
-      found.push({ kind: 'swift', command: `${prefix}swift test --build-system native`, requires: ['macos'], resources: 'light' });
+      found.push({ kind: 'swift', command: `${prefix}swift test --build-system native`, requires: ['macos'] });
       ignore.add(dir ? `${dir}/.build` : '.build');
     }
     const xcode = (await readdir(abs)).find((name) => name.endsWith('.xcworkspace') || name.endsWith('.xcodeproj'));
@@ -288,25 +286,24 @@ export async function detectProfiles(root: string): Promise<{ profiles: Detected
         kind: 'ios',
         command: `${prefix}xcodebuild test ${flag} ${xcode} -scheme ${scheme} -destination 'platform=iOS Simulator,name=iPhone 16'`,
         requires: ['macos', 'xcode', 'ios-simulator'],
-        resources: 'exclusive',
         note: 'check the scheme and the simulator name',
       });
       ignore.add('DerivedData');
     }
-    if (await has('go.mod')) found.push({ kind: 'go', command: `${prefix}go test ./...`, requires: toolchain, resources: 'light' });
+    if (await has('go.mod')) found.push({ kind: 'go', command: `${prefix}go test ./...`, requires: toolchain });
     if (await has('Cargo.toml')) {
-      found.push({ kind: 'cargo', command: `${prefix}cargo test`, requires: toolchain, resources: 'light' });
+      found.push({ kind: 'cargo', command: `${prefix}cargo test`, requires: toolchain });
       ignore.add(dir ? `${dir}/target` : 'target');
     }
     if (await has('pyproject.toml')) {
-      found.push({ kind: 'pytest', command: `${prefix}python -m pytest`, requires: toolchain, resources: 'light' });
+      found.push({ kind: 'pytest', command: `${prefix}python -m pytest`, requires: toolchain });
       ignore.add('.venv').add('**/__pycache__');
     }
     for (const entry of found) {
       const base = dir ? path.basename(dir) : '';
       let name = base ? (found.length === 1 ? base : `${base}-${entry.kind}`) : entry.kind;
       if (profiles.some((profile) => profile.name === name)) name = `${dir.replace(/\//g, '-')}-${entry.kind}`;
-      profiles.push({ name: name.replace(/[^A-Za-z0-9_-]/g, '-'), command: entry.command, requires: entry.requires, resources: entry.resources, note: entry.note });
+      profiles.push({ name: name.replace(/[^A-Za-z0-9_-]/g, '-'), command: entry.command, requires: entry.requires, note: entry.note });
     }
   }
   return { profiles, ignore: [...ignore] };
@@ -327,10 +324,10 @@ export function renderConfig(dirName: string, detected: { profiles: DetectedProf
   ];
   const profiles = detected.profiles.length
     ? detected.profiles
-    : [{ name: 'test', command: 'echo "replace with your test command"', requires: [], resources: 'light' as const, note: 'edit this' }];
+    : [{ name: 'test', command: 'echo "replace with your test command"', requires: [], note: 'edit this' }];
   for (const profile of profiles) {
     if (profile.note) lines.push(`  # ${profile.note}`);
-    lines.push(`  ${profile.name}:`, `    command: ${yamlString(profile.command)}`, `    resources: ${profile.resources}`);
+    lines.push(`  ${profile.name}:`, `    command: ${yamlString(profile.command)}`);
     if (profile.requires.length) lines.push(`    requires: [${profile.requires.join(', ')}]`);
   }
   return `${lines.join('\n')}\n`;

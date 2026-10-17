@@ -54,7 +54,7 @@ describe('testbox init', () => {
         cmd: 'cd client/swift-client && swift test --build-system native',
         requires: ['macos'],
       });
-      expect(config.profiles.ios).toMatchObject({ resources: 'exclusive', requires: ['macos', 'xcode', 'ios-simulator'] });
+      expect(config.profiles.ios).toMatchObject({ requires: ['macos', 'xcode', 'ios-simulator'] });
       expect(config.profiles.ios?.cmd).toContain('-project App.xcodeproj -scheme App');
       expect(config.ignore).toEqual(expect.arrayContaining(['.git', 'backend/.gradle', 'backend/build', 'client/swift-client/.build']));
 

@@ -50,13 +50,11 @@ ignore:                         # not synced; replaces the default list
 profiles:
   unit:
     command: pnpm test          # bash -c, in the repo root on the worker
-    resources: light            # light (default) or exclusive
     requires: [linux]           # worker labels; all must match
     artifacts:                  # globs to upload
       - coverage/**
   ios:
     command: xcodebuild test -scheme App -destination 'platform=iOS Simulator,name=iPhone 16'
-    resources: exclusive        # takes the worker alone; erases all simulators first
     requires: [macos, xcode]
 ```
 
@@ -66,7 +64,7 @@ Rules for good profiles:
 - The worker environment is minimal: only `PATH`, `HOME`, and a few system variables. Local env vars and `.env` files are not there.
 - A missing tool (for example `JAVA_HOME is not set`): pin it in the repo's `mise.toml` and add `requires: [mise]`. The worker runs `mise install` and `mise exec` for each job.
 - With `package.json` and `pnpm-lock.yaml`, the worker installs `node_modules` itself (cached by lockfile). Do not put `pnpm install` in the command.
-- Use `resources: exclusive` for simulators, Playwright with many browsers, or anything that cannot share the machine.
+- Testbox does not reset simulators, and other users can share the Mac. For a clean simulator, make one in the command (`xcrun simctl create`), use its UDID as the destination, and delete it in a `trap ... EXIT`.
 - Swift on a Mac worker: use `swift test --build-system native`; the default build system hangs there.
 
 ## More

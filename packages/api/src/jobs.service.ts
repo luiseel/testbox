@@ -17,7 +17,6 @@ import {
   type JobRecord,
   type LogLine,
   type Principal,
-  type ResourceClass,
   type SnapshotRecord,
   type WorkerRecord,
   type WorkspaceRecord,
@@ -29,7 +28,6 @@ export interface CreateJobInput {
   snapshotId: string;
   command: string;
   profile?: string | null;
-  resources?: 'light' | 'exclusive';
   artifactGlobs?: string[];
   requires?: string[];
   priority?: number;
@@ -113,7 +111,6 @@ export class JobsService {
       snapshotId: snapshot.id,
       command: input.command,
       profile,
-      resources: input.resources ?? 'light',
       artifactGlobs: input.artifactGlobs ?? [],
       requires,
       priority: input.priority ?? 0,
@@ -186,7 +183,6 @@ export class JobsService {
   /** Where Mutagen should sync. Prefers the workspace's warm worker. */
   async selectWorker(input: {
     requires?: string[];
-    resources?: ResourceClass;
     workspaceId?: string | null;
   }): Promise<WorkerRecord> {
     const requires = input.requires ?? [];
@@ -199,7 +195,7 @@ export class JobsService {
     );
     const affinity = input.workspaceId ? await this.store.getWorkspaceAffinity(input.workspaceId) : null;
     const chosen = chooseSyncTarget(
-      { requires, resources: input.resources ?? 'light' },
+      { requires },
       toPlacementWorkers(workers, active),
       affinity,
       now,
@@ -233,7 +229,6 @@ export class JobsService {
     body: {
       command: string;
       profile: string | null;
-      resources: 'light' | 'exclusive';
       artifactGlobs: string[];
       requires: string[];
       targetWorkerId: string | null;
@@ -253,7 +248,6 @@ export class JobsService {
       ownerId,
       command: body.command,
       profile: body.profile,
-      resources: body.resources,
       artifactGlobs: body.artifactGlobs,
       requires: body.requires,
       targetWorkerId: body.targetWorkerId,

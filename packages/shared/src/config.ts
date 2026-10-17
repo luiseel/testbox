@@ -19,7 +19,6 @@ export const DEFAULT_IGNORE = [
 
 const profileObject = z.object({
   cmd: z.string().min(1),
-  resources: z.enum(['light', 'exclusive']).default('light'),
   artifacts: z.array(z.string()).default([]),
   requires: z.array(z.string()).default([]),
 });
