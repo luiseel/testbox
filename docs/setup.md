@@ -109,7 +109,7 @@ Do not add Redis (6379): only workers use it, and they are on the LAN.
 testbox admin upgrade          # the control plane, then every worker
 ```
 
-It fast-forwards each checkout to `main` (or `--ref <branch>`), rebuilds, restarts, and waits for each worker. `--no-control-plane` updates the workers only. A worker whose service config must change (a new Redis password, labels, or capacity) needs `testbox admin add-worker` again.
+It fast-forwards each checkout to `master` (or `--ref <branch>`), rebuilds, restarts, and waits for each worker. `--no-control-plane` updates the workers only. A worker whose service config must change (a new Redis password, labels, or capacity) needs `testbox admin add-worker` again.
 
 To update the CLI: `git pull`, then `./scripts/install-cli.sh`.
 

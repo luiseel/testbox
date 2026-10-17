@@ -252,7 +252,7 @@ describe('testbox admin', () => {
       expect(await runCli(['admin', 'init-control-plane', 'me@10.0.0.5', '--user', 'ana'], io)).toBe(0);
       expect(scripts[0]?.args.slice(-2)).toEqual(['--', 'bash -s']);
       expect(scripts[0]?.input).toContain("export TB_GIT_URL='git@example.com:me/testbox.git'");
-      expect(scripts[0]?.input).toContain("export TB_GIT_REF='main'");
+      expect(scripts[0]?.input).toContain("export TB_GIT_REF='master'");
       expect(stderr.join('')).toContain('  ==> docker compose up');
       expect(stderr.join('')).toContain('Redis now has a password');
       const admin = JSON.parse(await readFile(adminConfigPath(home), 'utf8')) as { controlPlane: { address: string } };

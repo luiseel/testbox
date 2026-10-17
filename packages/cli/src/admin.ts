@@ -54,6 +54,7 @@ interface WorkerResult {
   node: string;
 }
 
+export const DEFAULT_GIT_REF = 'master';
 const DEFAULT_REPO_DIR = '~/testbox/app';
 const DEFAULT_DATA_DIR = '~/testbox';
 
@@ -96,7 +97,7 @@ export class AdminApp {
         env: {
           TB_REPO_DIR: repoDir,
           TB_GIT_URL: flags.gitUrl ?? (await this.gitUrl()),
-          TB_GIT_REF: flags.ref ?? 'main',
+          TB_GIT_REF: flags.ref ?? DEFAULT_GIT_REF,
           TB_API_PORT: flags.apiPort ?? '3000',
           TB_REDIS_PORT: flags.redisPort ?? '6379',
           TB_DATA_DIR: flags.dataDir ?? '~/testbox',
@@ -178,7 +179,7 @@ export class AdminApp {
           TB_REPO_DIR: flags.repoDir ?? DEFAULT_REPO_DIR,
           TB_DATA_DIR: flags.dataDir ?? DEFAULT_DATA_DIR,
           TB_GIT_URL: flags.gitUrl ?? (await this.gitUrl()),
-          TB_GIT_REF: flags.ref ?? 'main',
+          TB_GIT_REF: flags.ref ?? DEFAULT_GIT_REF,
           TB_REDIS_URL: workerRedisUrl(plane.address, plane.redisPort ?? secrets.redisPort, secrets.redisPassword),
           TB_API_URL: await this.apiUrl(),
           TB_WORKER_TOKEN: secrets.workerToken,
@@ -212,7 +213,7 @@ export class AdminApp {
     try {
       const plane = await this.controlPlane();
       const gitUrl = flags.gitUrl ?? (await this.gitUrl());
-      const ref = flags.ref ?? 'main';
+      const ref = flags.ref ?? DEFAULT_GIT_REF;
       if (flags.controlPlane !== false) {
         output.info(`updating the control plane on ${plane.sshHost}`);
         await runBootstrap({
