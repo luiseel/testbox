@@ -112,7 +112,6 @@ export class HttpApi {
     snapshotId: string;
     command: string;
     profile?: string | null;
-    resources?: 'light' | 'exclusive';
     artifactGlobs?: string[];
     requires?: string[];
     priority?: number;
@@ -136,7 +135,6 @@ export class HttpApi {
 
   async selectWorker(input: {
     requires: string[];
-    resources: 'light' | 'exclusive';
     workspaceId?: string;
   }): Promise<{ id: string; sshHost: string | null; labels: string[] } | null> {
     const body = await this.request<{ worker?: { id?: string; sshHost?: string | null; labels?: string[] } }>(

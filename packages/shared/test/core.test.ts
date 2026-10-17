@@ -139,7 +139,6 @@ profiles:
     cmd: pnpm test
   ios:
     cmd: xcodebuild test
-    resources: exclusive
     artifacts:
       - "**/*.xcresult"
     requires:
@@ -147,8 +146,6 @@ profiles:
 `);
     expect(config.project).toBe('demo');
     expect(config.ignore).toContain('node_modules');
-    expect(config.profiles.unit.resources).toBe('light');
-    expect(config.profiles.ios.resources).toBe('exclusive');
     expect(config.profiles.ios.requires).toEqual(['ios-simulator']);
     const aliased = parseTestboxConfig(`
 project: demo

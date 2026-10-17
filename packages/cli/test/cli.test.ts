@@ -112,7 +112,7 @@ describe('cli', () => {
 
       await writeFile(
         path.join(project, 'testbox.yml'),
-        'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n    resources: light\n',
+        'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n',
       );
       const start = await runCli(['start', '--direct', '--ssh-host', 'testbox'], io(home, project, remote, stdout, stderr));
       expect(start).toBe(0);
@@ -186,7 +186,7 @@ describe('cli', () => {
     );
     await write(
       path.join(project, 'testbox.yml'),
-      'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n    resources: light\n    artifacts: ["coverage/**"]\n',
+      'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n    artifacts: ["coverage/**"]\n',
     );
     await mkdir(path.join(project, '.testbox'), { recursive: true });
     await write(
@@ -265,7 +265,7 @@ describe('cli', () => {
     );
     await write(
       path.join(project, 'testbox.yml'),
-      'project: demo\nprofiles:\n  ios:\n    cmd: xcodebuild test\n    resources: exclusive\n    requires: [macos, xcode]\n',
+      'project: demo\nprofiles:\n  ios:\n    cmd: xcodebuild test\n    requires: [macos, xcode]\n',
     );
     await mkdir(path.join(project, '.testbox'), { recursive: true });
     await write(

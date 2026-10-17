@@ -32,7 +32,6 @@ function publicJob(job: JobRecord): Omit<JobRecord, 'queueKey'> {
     ownerId: job.ownerId,
     command: job.command,
     profile: job.profile,
-    resources: job.resources,
     artifactGlobs: job.artifactGlobs,
     requires: job.requires,
     priority: job.priority,
@@ -160,7 +159,6 @@ export class JobsController {
         snapshotId: z.string().regex(/^snap_[a-f0-9]{24}$/),
         command: z.string().min(1).max(10_000),
         profile: z.string().min(1).max(100).nullable().optional(),
-        resources: z.enum(['light', 'exclusive']).optional(),
         artifactGlobs: z.array(z.string()).optional(),
         requires: z.array(z.string()).optional(),
         targetWorkerId: z.string().min(1).max(200).nullable().optional(),
@@ -306,7 +304,6 @@ export class WorkersController {
     const input = parse(
       z.object({
         requires: z.array(z.string()).optional(),
-        resources: z.enum(['light', 'exclusive']).optional(),
         workspaceId: z.string().min(1).nullable().optional(),
       }),
       body,

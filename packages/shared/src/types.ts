@@ -1,6 +1,5 @@
 import type { JobState } from './states';
 
-export type ResourceClass = 'light' | 'exclusive';
 export type PrincipalRole = 'admin' | 'user' | 'worker';
 
 export interface Principal {
@@ -54,7 +53,6 @@ export interface JobRecord {
   ownerId: string;
   command: string;
   profile: string | null;
-  resources: ResourceClass;
   artifactGlobs: string[];
   requires: string[];
   priority: number;

@@ -60,7 +60,6 @@ profiles:
     requires: [mise]            # Java from the repo's mise.toml
   ios:
     command: xcodebuild test -scheme App -destination 'platform=iOS Simulator,name=iPhone 16'
-    resources: exclusive        # this job takes the Mac alone
     requires: [macos, xcode]
 ```
 
@@ -86,7 +85,7 @@ pnpm test        # needs redis-server; starts it on 127.0.0.1:6379 when none run
 ```
 packages/shared   states, fingerprints, snapshot lock, job store, shell quoting
 packages/api      NestJS auth, jobs, SSE, retention
-packages/worker   claim loop, process groups, caches, mise, simulator reset
+packages/worker   claim loop, process groups, caches, mise
 packages/cli      commands, per-worker Mutagen sessions, testbox admin
 deploy/           LaunchAgent and systemd templates, install scripts
 deploy/bootstrap  the setup scripts that testbox admin runs over SSH

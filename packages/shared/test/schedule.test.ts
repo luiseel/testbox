@@ -17,7 +17,6 @@ function worker(patch: Partial<PlacementWorker> & Pick<PlacementWorker, 'id' | '
     capacity: 1,
     lastSeen: now,
     active: 0,
-    exclusive: false,
     sshHost: null,
     ...patch,
   };
@@ -38,34 +37,28 @@ describe('scheduler', () => {
   it('routes to a worker that satisfies labels and prefers workspace affinity', () => {
     const linux = worker({ id: 'linux-1', labels: ['linux', 'x64'] });
     const mac = worker({ id: 'mac-1', labels: ['macos', 'arm64', 'xcode'] });
-    const ios = { requires: ['macos', 'xcode'], resources: 'exclusive' as const };
+    const ios = { requires: ['macos', 'xcode'] };
     expect(chooseWorker(ios, [linux, mac], null, now, ttl)?.id).toBe('mac-1');
-    expect(chooseWorker({ requires: ['linux'], resources: 'light' }, [linux, mac], null, now, ttl)?.id).toBe('linux-1');
+    expect(chooseWorker({ requires: ['linux'] }, [linux, mac], null, now, ttl)?.id).toBe('linux-1');
 
     const a = worker({ id: 'a', labels: ['linux'], sshHost: 'testbox@a' });
     const b = worker({ id: 'b', labels: ['linux'], sshHost: 'testbox@b' });
-    const unit = { requires: [] as string[], resources: 'light' as const };
+    const unit = { requires: [] as string[] };
     expect(chooseWorker(unit, [b, a], null, now, ttl)?.id).toBe('a');
     expect(chooseWorker(unit, [a, b], 'b', now, ttl)?.id).toBe('b');
     expect(chooseSyncTarget(unit, [a, b], 'b', now, ttl)?.id).toBe('b');
   });
 
-  it('skips an affinity worker that is full and refuses exclusive jobs on a busy worker', () => {
+  it('skips workers that are full, stale, or not the pinned worker', () => {
     const warm = worker({ id: 'warm', labels: ['linux'], capacity: 2, active: 2 });
     const cold = worker({ id: 'cold', labels: ['linux'], capacity: 2, active: 0 });
-    const unit = { requires: [] as string[], resources: 'light' as const };
+    const unit = { requires: [] as string[] };
     expect(chooseWorker(unit, [warm, cold], 'warm', now, ttl)?.id).toBe('cold');
 
-    const busy = worker({ id: 'busy', labels: ['macos', 'xcode'], active: 1, capacity: 2 });
-    const idle = worker({ id: 'idle', labels: ['macos', 'xcode'], active: 0 });
-    const exclusive = { requires: ['macos', 'xcode'], resources: 'exclusive' as const };
-    expect(workerCanRun(busy, exclusive, now, ttl)).toBe(false);
-    expect(chooseWorker(exclusive, [busy, idle], 'busy', now, ttl)?.id).toBe('idle');
-
-    const holding = worker({ id: 'hold', labels: ['linux'], capacity: 4, active: 1, exclusive: true });
-    expect(workerCanRun(holding, unit, now, ttl)).toBe(false);
+    const busy = worker({ id: 'busy', labels: ['linux'], active: 1, capacity: 2 });
+    const idle = worker({ id: 'idle', labels: ['linux'], active: 0 });
     expect(workerCanRun(worker({ id: 'stale', labels: ['linux'], lastSeen: now - ttl - 1 }), unit, now, ttl)).toBe(false);
-    expect(workerCanRun(idle, { ...exclusive, targetWorkerId: 'busy' }, now, ttl)).toBe(false);
+    expect(workerCanRun(idle, { ...unit, targetWorkerId: 'busy' }, now, ttl)).toBe(false);
     expect(workerCanRun(busy, { ...unit, targetWorkerId: 'busy' }, now, ttl)).toBe(true);
   });
 

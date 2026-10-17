@@ -20,7 +20,6 @@ import { buildJobEnv, secretsFromEnv } from './env';
 import { processStillOwnsJob, runCommand, killProcessGroup } from './executor';
 import { hasMiseConfig, miseEnv, miseExecArgv } from './mise';
 import { probeRuntime } from './probe';
-import { simulatorForPlatform, type SimulatorControl } from './simulator';
 import { uploadArtifacts } from './upload';
 
 export interface DaemonOptions {
@@ -41,7 +40,6 @@ export interface DaemonOptions {
   apiUrl?: string;
   workerToken?: string;
   processImmediately?: boolean;
-  simulator?: SimulatorControl;
   install?: (cwd: string, storeDir: string) => Promise<number>;
   env?: NodeJS.ProcessEnv;
 }
@@ -56,11 +54,9 @@ export class Daemon {
   private pumpPromise: Promise<void> | null = null;
   private wake: (() => void) | null = null;
   private inflight = 0;
-  private exclusiveHeld = false;
   private readonly aborts = new Map<string, AbortController>();
   private readonly renewals = new Map<string, () => void>();
   private readonly running = new Set<Promise<void>>();
-  private readonly simulator: SimulatorControl;
   private readonly env: NodeJS.ProcessEnv;
   private lastRedisError = '';
   private lastRedisErrorAt = 0;
@@ -69,7 +65,6 @@ export class Daemon {
     this.redis = new IORedis(opts.redisUrl, { maxRetriesPerRequest: null });
     this.redis.on('error', (err: Error) => this.redisError(err));
     this.store = new JobStore(this.redis, opts.keyPrefix);
-    this.simulator = opts.simulator ?? simulatorForPlatform();
     this.env = opts.env ?? process.env;
   }
 
@@ -169,7 +164,7 @@ export class Daemon {
     while (this.processing) {
       let claimed = false;
       try {
-        while (this.processing && this.inflight < this.capacity && !this.exclusiveHeld) {
+        while (this.processing && this.inflight < this.capacity) {
           const job = await claimNextJob(
             this.store,
             this.opts.workerId,
@@ -180,7 +175,6 @@ export class Daemon {
           if (!job) break;
           claimed = true;
           this.launch(job);
-          if (job.resources === 'exclusive') break;
         }
       } catch {
         claimed = false;
@@ -191,11 +185,9 @@ export class Daemon {
   }
 
   private launch(job: JobRecord): void {
-    if (job.resources === 'exclusive') this.exclusiveHeld = true;
     this.inflight += 1;
     const run = this.runAssigned(job.id).finally(() => {
       this.inflight -= 1;
-      if (job.resources === 'exclusive') this.exclusiveHeld = false;
       this.wake?.();
     });
     this.running.add(run);
@@ -317,10 +309,6 @@ export class Daemon {
       fingerprint,
       install,
     });
-    if (job.resources === 'exclusive' && this.simulator.enabled !== false) {
-      await this.simulator.reset();
-      await this.noteLog(job.id, 'stderr', 'reset simulators for exclusive job');
-    }
     return { mise };
   }
 

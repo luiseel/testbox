@@ -235,23 +235,9 @@ describe('queue and execution', () => {
     expect(after.json.job.state).toBe('timed_out');
   });
 
-  it('resets simulators for exclusive jobs only and cleans expired data without touching cache', async () => {
-    const resets: string[] = [];
-    const ctx = await boot({
-      simulator: {
-        async reset() {
-          resets.push('reset');
-        },
-      },
-    });
+  it('cleans expired data without touching cache', async () => {
+    const ctx = await boot();
     open.push(ctx);
-    const alice = await user(ctx, 'alice');
-    const light = await submit(ctx, alice.token, { command: 'true', profile: 'light', resources: 'light' });
-    const exclusive = await submit(ctx, alice.token, { command: 'true', profile: 'ios', resources: 'exclusive' });
-    await ctx.daemon?.startProcessing();
-    expect((await waitJob(ctx, alice.token, light.json.job.id)).state).toBe('succeeded');
-    expect((await waitJob(ctx, alice.token, exclusive.json.job.id)).state).toBe('succeeded');
-    expect(resets).toEqual(['reset']);
     await mkdir(path.join(ctx.dataDir, 'cache'), { recursive: true });
     await writeFile(path.join(ctx.dataDir, 'cache', 'warm.txt'), 'keep');
     await mkdir(path.join(ctx.dataDir, 'artifacts', 'job_aaaaaaaaaaaaaaaaaaaaaaaa'), { recursive: true });
@@ -274,7 +260,6 @@ describe('queue and execution', () => {
     const ios = await submit(ctx, alice.token, {
       command: 'true',
       profile: 'ios',
-      resources: 'exclusive',
       requires: ['macos', 'xcode'],
     });
     const unit = await submit(ctx, alice.token, {
@@ -441,7 +426,6 @@ async function boot(opts?: {
   withDaemon?: boolean;
   leaseMs?: number;
   sweeperMs?: number;
-  simulator?: { reset: () => Promise<void> };
   workerId?: string;
   labels?: string[];
   capacity?: number;
@@ -480,7 +464,6 @@ async function boot(opts?: {
           apiUrl: base,
           workerToken: 'worker-token-secret-123',
           processImmediately: false,
-          simulator: opts?.simulator,
           env: opts?.env,
         });
   return {
@@ -530,7 +513,6 @@ async function submit(
     command: string;
     profile?: string;
     priority?: number;
-    resources?: 'light' | 'exclusive';
     requires?: string[];
     mutateSnapshot?: boolean;
     workspace?: { id: string; stagingRel: string };
@@ -567,7 +549,6 @@ async function submit(
     command: opts.command,
     profile: opts.profile ?? null,
     priority: opts.priority ?? 0,
-    resources: opts.resources ?? 'light',
     requires: opts.requires,
     timeoutMs: 20_000,
   });

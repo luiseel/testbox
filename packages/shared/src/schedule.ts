@@ -1,5 +1,5 @@
 import type { JobStore } from './job-store';
-import type { JobRecord, ResourceClass, WorkerRecord } from './types';
+import type { JobRecord, WorkerRecord } from './types';
 
 export interface PlacementWorker {
   id: string;
@@ -7,13 +7,11 @@ export interface PlacementWorker {
   capacity: number;
   lastSeen: number;
   active: number;
-  exclusive: boolean;
   sshHost: string | null;
 }
 
 export interface PlacementRequest {
   requires: readonly string[];
-  resources: ResourceClass;
   targetWorkerId?: string | null;
 }
 
@@ -57,7 +55,6 @@ export function toPlacementWorkers(workers: readonly WorkerRecord[], active: rea
       capacity: worker.capacity > 0 ? worker.capacity : 1,
       lastSeen: worker.lastSeen,
       active: mine.length,
-      exclusive: mine.some((job) => job.resources === 'exclusive'),
       sshHost: worker.sshHost ?? null,
     };
   });
@@ -70,8 +67,6 @@ export function workerIsHealthy(worker: PlacementWorker, now: number, heartbeatT
 /**
  * A worker can take a job when it is healthy, its labels cover `requires`,
  * it is the pinned worker when one is set, and it has a free slot.
- * An exclusive job needs the machine to itself. A running exclusive job
- * occupies the worker completely.
  */
 export function workerCanRun(
   worker: PlacementWorker,
@@ -82,8 +77,6 @@ export function workerCanRun(
   if (!workerIsHealthy(worker, now, heartbeatTtlMs)) return false;
   if (job.targetWorkerId && job.targetWorkerId !== worker.id) return false;
   if (!labelsSatisfy(worker.labels, job.requires)) return false;
-  if (worker.exclusive) return false;
-  if (job.resources === 'exclusive') return worker.active === 0;
   return worker.active < worker.capacity;
 }
 
@@ -144,7 +137,7 @@ export async function claimNextJob(
     const placement = toPlacementWorkers(workers, active);
     const me = placement.find((worker) => worker.id === workerId);
     if (!me || !workerIsHealthy(me, now, heartbeatTtlMs)) return null;
-    if (me.exclusive || me.active >= me.capacity) return null;
+    if (me.active >= me.capacity) return null;
 
     const queued = rankQueuedJobs(records.filter((job) => job.state === 'queued'));
     for (const job of queued) {
