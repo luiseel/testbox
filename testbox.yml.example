@@ -8,22 +8,17 @@ ignore:
 profiles:
   typecheck:
     command: pnpm typecheck
-    resources: light
   unit:
     command: pnpm test
-    resources: light
   e2e:
     command: pnpm exec playwright test
-    resources: light
   playwright:
     command: pnpm exec playwright test
-    resources: exclusive
     artifacts:
       - playwright-report/**
       - test-results/**
   ios:
     command: xcodebuild test -scheme App -destination 'platform=iOS Simulator,name=iPhone 16'
-    resources: exclusive
     requires:
       - macos
       - xcode
