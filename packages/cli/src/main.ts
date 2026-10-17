@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Command, CommanderError } from 'commander';
 import type { EventEmitter } from 'events';
-import { AdminApp, type AddWorkerFlags, type InitControlPlaneFlags, type UpgradeFlags } from './admin';
+import { AdminApp, DEFAULT_GIT_REF, type AddWorkerFlags, type InitControlPlaneFlags, type UpgradeFlags } from './admin';
 import { TestboxApp, type CliIO } from './commands';
 import { DeveloperApp } from './developer';
 import { defaultSpawn } from './remote';
@@ -168,7 +168,7 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
     .option('--repo-dir <dir>', 'checkout on the host', '~/testbox/app')
     .option('--data-dir <dir>', 'API data directory on the host', '~/testbox')
     .option('--git-url <url>', 'repo to clone (default: origin of this checkout)')
-    .option('--ref <branch>', 'branch to deploy', 'main')
+    .option('--ref <branch>', 'branch to deploy', DEFAULT_GIT_REF)
     .option('--user <name>', 'your user name on the API (default: your login name)')
     .action(async (sshHost: string, opts: InitControlPlaneFlags) => {
       code = await adminApp.initControlPlane(sshHost, opts);
@@ -185,7 +185,7 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
     .option('--repo-dir <dir>', 'checkout on the host', '~/testbox/app')
     .option('--data-dir <dir>', 'worker data directory on the host', '~/testbox')
     .option('--git-url <url>', 'repo to clone (default: origin of this checkout)')
-    .option('--ref <branch>', 'branch to deploy', 'main')
+    .option('--ref <branch>', 'branch to deploy', DEFAULT_GIT_REF)
     .option('--wait <seconds>', 'how long to wait for the first heartbeat', '600')
     .option('--no-smoke', 'skip the test job')
     .action(async (sshHost: string, opts: AddWorkerFlags) => {
@@ -196,7 +196,7 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
     .command('upgrade')
     .description('update the control plane, then pull, build, and restart every worker')
     .option('--git-url <url>', 'repo to pull (default: origin of this checkout)')
-    .option('--ref <branch>', 'branch to deploy', 'main')
+    .option('--ref <branch>', 'branch to deploy', DEFAULT_GIT_REF)
     .option('--no-control-plane', 'update the workers only')
     .action(async (opts: UpgradeFlags) => {
       code = await adminApp.upgrade(opts);
