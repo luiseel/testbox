@@ -11,6 +11,7 @@ import type {
   WorkerRecord,
   WorkspaceRecord,
 } from './types';
+import type { JobSource } from './source';
 
 const TRANSITION_LUA = `
 local key = KEYS[1]
@@ -91,6 +92,7 @@ function encodeJob(job: JobRecord): Record<string, string> {
     endedAt: job.endedAt === null ? '' : String(job.endedAt),
     workerId: job.workerId ?? '',
     targetWorkerId: job.targetWorkerId ?? '',
+    source: job.source ? JSON.stringify(job.source) : '',
     attemptId: job.attemptId ?? '',
     exitCode: job.exitCode === null ? '' : String(job.exitCode),
     error: job.error ?? '',
@@ -124,6 +126,7 @@ function decodeJob(raw: Record<string, string>): JobRecord | null {
     endedAt: num(raw.endedAt),
     workerId: raw.workerId || null,
     targetWorkerId: raw.targetWorkerId || null,
+    source: raw.source ? (JSON.parse(raw.source) as JobSource) : null,
     attemptId: raw.attemptId || null,
     exitCode: num(raw.exitCode),
     error: raw.error || null,

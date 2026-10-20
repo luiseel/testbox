@@ -8,6 +8,7 @@ import {
   directoryDigest,
   ensureDependencies,
   fingerprintFromDirectory,
+  formatJobSource,
   isTerminal,
   JobStore,
   resolveInside,
@@ -230,6 +231,7 @@ export class Daemon {
         });
         return;
       }
+      if (job.source) await this.noteLog(job.id, 'stderr', formatJobSource(job.source));
       const { mise } = await this.prepare(job);
       const running = await this.store.transition(jobId, ['assigned'], 'running', {
         startedAt: Date.now(),

@@ -16,6 +16,8 @@ your machine                           control plane (one host, Docker)
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
+Each checkout of a repo (also a git worktree) syncs into its own folder on the worker: `~/testbox/workspaces/<user>/<project>/<workspace id>`. Old flat folders (`workspaces/<user>/<project>`) stay on the worker until you remove them.
+
 The control plane decides; it does not run code. Workers connect out to Redis and the API and pull the jobs that match their labels. Only SSH comes in to a worker, for the file sync.
 
 ## Set up
@@ -44,7 +46,7 @@ testbox setup --api-url http://<control-plane-ip>:3000 --token <token>
 
 ```sh
 testbox init             # write testbox.yml for this repo, then edit it
-testbox start            # start syncing this repo
+testbox start            # start syncing this checkout (safe to run again)
 testbox verify unit      # run the `unit` profile on a worker
 testbox doctor           # when something is wrong: each problem, with its fix
 ```

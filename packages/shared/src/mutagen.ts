@@ -58,3 +58,59 @@ export function buildMutagenTerminateArgs(name: string): string[] {
   assertSessionName(name);
   return ['sync', 'terminate', name];
 }
+
+/** One entry of `mutagen sync list --template '{{json .}}'` (Mutagen 0.18). */
+export interface MutagenSessionInfo {
+  name: string;
+  /** The local root. Testbox always syncs from a local path. */
+  alphaPath: string;
+  /** The destination as `[user@]host[:port]:path`, or a plain path when it is local. */
+  betaUrl: string;
+  /** For example `watching`, `disconnected`, or `halted-on-root-deletion`. */
+  status: string;
+  paused: boolean;
+}
+
+interface MutagenUrlJson {
+  user?: string;
+  host?: string;
+  port?: number;
+  path?: string;
+}
+
+function formatMutagenUrl(url: MutagenUrlJson | undefined): string {
+  if (!url) return '';
+  const target = url.path ?? '';
+  if (!url.host) return target;
+  const user = url.user ? `${url.user}@` : '';
+  const port = url.port ? `:${url.port}` : '';
+  return `${user}${url.host}${port}:${target}`;
+}
+
+export function buildMutagenListArgs(): string[] {
+  return ['sync', 'list', '--template', '{{json .}}'];
+}
+
+/** Parse the output of the command from buildMutagenListArgs. */
+export function parseMutagenSessions(json: string): MutagenSessionInfo[] {
+  const text = json.trim();
+  if (text === '' || text === 'null') return [];
+  const raw = JSON.parse(text) as unknown;
+  if (!Array.isArray(raw)) throw new Error('mutagen sync list did not return a JSON array');
+  return raw.map((entry) => {
+    const session = entry as {
+      name?: string;
+      alpha?: MutagenUrlJson;
+      beta?: MutagenUrlJson;
+      status?: string;
+      paused?: boolean;
+    };
+    return {
+      name: session.name ?? '',
+      alphaPath: session.alpha?.path ?? '',
+      betaUrl: formatMutagenUrl(session.beta),
+      status: session.status ?? '',
+      paused: Boolean(session.paused),
+    };
+  });
+}

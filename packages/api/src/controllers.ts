@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Headers, Inject, Param, Post, Query, Req, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { z } from 'zod';
-import { AppError, isTerminal, JobStore, type JobRecord } from '@testbox/shared';
+import { AppError, isTerminal, JOB_SOURCE_MAX_LENGTH, JobStore, type JobRecord } from '@testbox/shared';
 import { listArtifactFiles, openArtifact, readRequestBody, saveArtifact } from './artifacts';
 import { AuthService } from './auth.service';
 import { AuthedRequest, Public, Roles } from './auth.guard';
@@ -43,6 +43,7 @@ function publicJob(job: JobRecord): Omit<JobRecord, 'queueKey'> {
     endedAt: job.endedAt,
     workerId: job.workerId,
     targetWorkerId: job.targetWorkerId,
+    source: job.source,
     attemptId: job.attemptId,
     exitCode: job.exitCode,
     error: job.error,
@@ -165,6 +166,14 @@ export class JobsController {
         priority: z.number().int().min(0).max(999).optional(),
         timeoutMs: z.number().int().min(1000).max(24 * 60 * 60 * 1000).optional(),
         idempotencyKey: z.string().min(8).max(200).optional(),
+        source: z
+          .object({
+            path: z.string().min(1).max(JOB_SOURCE_MAX_LENGTH),
+            branch: z.string().max(JOB_SOURCE_MAX_LENGTH).optional(),
+            commit: z.string().max(JOB_SOURCE_MAX_LENGTH).optional(),
+            dirty: z.boolean().optional(),
+          })
+          .optional(),
       }),
       body,
     );

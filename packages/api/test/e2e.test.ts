@@ -28,6 +28,7 @@ describe('queue and execution', () => {
     const bob = await user(ctx, 'bob');
     const ws = await call(ctx, alice.token, 'POST', '/v1/workspaces', { project: 'demo' });
     expect(ws.status).toBe(201);
+    expect(ws.json.stagingRel).toBe(`workspaces/${alice.id}/demo/${ws.json.id}`);
     const hidden = await call(ctx, bob.token, 'GET', `/v1/workspaces/${ws.json.id}`);
     expect(hidden.status).toBe(404);
     const denied = await call(ctx, '', 'POST', '/v1/jobs', {});
@@ -299,6 +300,27 @@ describe('queue and execution', () => {
     expect(done.state).toBe('succeeded');
   });
 
+  it('keeps the job source and logs it as the first line, before mise install', async () => {
+    const ctx = await boot({ labels: ['linux', 'node', 'mise'], env: await fakeMiseEnv(0) });
+    open.push(ctx);
+    const alice = await user(ctx, 'alice');
+    const source = { path: '/Users/ana/code/app', branch: 'TGN-811', commit: '3edf65d', dirty: true };
+    const job = await submit(ctx, alice.token, {
+      command: 'echo ran',
+      requires: ['mise'],
+      files: { 'mise.toml': '[tools]\n' },
+      source,
+    });
+    expect(job.status).toBe(201);
+    const id = job.json.job.id as string;
+    expect((await call(ctx, alice.token, 'GET', `/v1/jobs/${id}`)).json.job.source).toEqual(source);
+    await ctx.daemon?.startProcessing();
+    expect((await waitJob(ctx, alice.token, id)).state).toBe('succeeded');
+    const logs = await call(ctx, alice.token, 'GET', `/v1/jobs/${id}/logs`);
+    const lines = (logs.json.lines as { stream: string; line: string }[]).map((entry) => `${entry.stream}: ${entry.line}`);
+    expect(lines.slice(0, 2)).toEqual(['stderr: source: /Users/ana/code/app TGN-811@3edf65d (dirty)', 'stderr: mise install']);
+  });
+
   it('fails the job without running the command when mise install fails', async () => {
     const ctx = await boot({ labels: ['linux', 'node', 'mise'], env: await fakeMiseEnv(3) });
     open.push(ctx);
@@ -517,6 +539,7 @@ async function submit(
     mutateSnapshot?: boolean;
     workspace?: { id: string; stagingRel: string };
     files?: Record<string, string>;
+    source?: { path: string; branch?: string; commit?: string; dirty?: boolean };
   },
 ) {
   const ws = opts.workspace
@@ -551,6 +574,7 @@ async function submit(
     priority: opts.priority ?? 0,
     requires: opts.requires,
     timeoutMs: 20_000,
+    source: opts.source,
   });
 }
 

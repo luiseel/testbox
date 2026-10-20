@@ -15,6 +15,7 @@ import {
   stagingRel,
   toPlacementWorkers,
   type JobRecord,
+  type JobSource,
   type LogLine,
   type Principal,
   type SnapshotRecord,
@@ -34,6 +35,7 @@ export interface CreateJobInput {
   timeoutMs?: number;
   idempotencyKey?: string;
   targetWorkerId?: string | null;
+  source?: JobSource;
 }
 
 @Injectable()
@@ -45,11 +47,12 @@ export class JobsService {
   ) {}
 
   async createWorkspace(ownerId: string, project: string): Promise<WorkspaceRecord> {
+    const id = createId('ws');
     const workspace: WorkspaceRecord = {
-      id: createId('ws'),
+      id,
       project,
       ownerId,
-      stagingRel: stagingRel(ownerId, project),
+      stagingRel: stagingRel(ownerId, project, id),
       createdAt: Date.now(),
     };
     await this.store.createWorkspace(workspace);
@@ -127,12 +130,12 @@ export class JobsService {
           if (!job) throw new AppError('NOT_FOUND', 'job not found', 404);
           return { job, superseded: [] };
         }
-        const created = await this.enqueue(owner.id, workspace.id, snapshot, body);
+        const created = await this.enqueue(owner.id, workspace.id, snapshot, body, input.source ?? null);
         await this.store.putIdempotency(owner.id, input.idempotencyKey!, created.job.id, requestHash);
         return created;
       });
     }
-    return this.enqueue(owner.id, workspace.id, snapshot, body);
+    return this.enqueue(owner.id, workspace.id, snapshot, body, input.source ?? null);
   }
 
   async getJob(id: string, ownerId: string): Promise<JobRecord> {
@@ -237,6 +240,7 @@ export class JobsService {
       workspaceId: string;
       snapshotId: string;
     },
+    source: JobSource | null,
   ): Promise<{ job: JobRecord; superseded: string[] }> {
     const now = Date.now();
     const job: JobRecord = {
@@ -251,6 +255,7 @@ export class JobsService {
       artifactGlobs: body.artifactGlobs,
       requires: body.requires,
       targetWorkerId: body.targetWorkerId,
+      source,
       priority: body.priority,
       timeoutMs: body.timeoutMs,
       state: 'queued',

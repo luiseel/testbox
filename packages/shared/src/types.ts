@@ -1,3 +1,4 @@
+import type { JobSource } from './source';
 import type { JobState } from './states';
 
 export type PrincipalRole = 'admin' | 'user' | 'worker';
@@ -65,6 +66,8 @@ export interface JobRecord {
   workerId: string | null;
   /** When set, only this worker may run the job (the snapshot lives on its disk). */
   targetWorkerId: string | null;
+  /** The checkout the CLI sent the job from; null for jobs without it. */
+  source: JobSource | null;
   attemptId: string | null;
   exitCode: number | null;
   error: string | null;

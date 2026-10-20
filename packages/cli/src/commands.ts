@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { EventEmitter } from 'events';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
@@ -6,11 +7,13 @@ import {
   ExitCode,
   exitCodeForJob,
   fingerprintFromDirectory,
+  formatJobSource,
   loadRepoConfig,
   needsDependencyRefresh,
   sessionName,
   type DependencyFingerprint,
   type JobState,
+  type MutagenSessionInfo,
   type ProfileConfig,
   type TestboxConfig,
 } from '@testbox/shared';
@@ -19,14 +22,17 @@ import {
   readUserConfig,
   readWorkspaceState,
   removeWorkspaceState,
+  workspaceSessionNames,
   writeUserConfig,
   writeWorkspaceState,
   type UserConfig,
+  type WorkerSession,
   type WorkspaceState,
 } from './config-store';
 import { attachInterrupt } from './interrupt';
 import { Output, type TextSink } from './output';
 import { mutagenDestination, MutagenSsh, RemoteUnavailable, SyncError, type RemoteRunner } from './remote';
+import { collectSource } from './source';
 
 export interface CliIO {
   stdout: TextSink;
@@ -90,22 +96,46 @@ export class TestboxApp {
       const loaded = await loadRepoConfig(this.io.cwd);
       const user = await this.requireUser(flags.direct === true);
       const direct = flags.direct === true;
+      const configDir = path.dirname(loaded.file);
+      const project = loaded.config.project;
+      // A state file copied from another checkout is not ours: its sessions sync that other checkout.
+      const stored = await readWorkspaceState(configDir);
+      const previous = stored && stored.configDir === configDir ? stored : null;
       let sshHost = flags.sshHost || user?.sshHost || loaded.config.sshHost;
       const remoteRoot = user?.remoteRoot ?? '~/testbox';
-      let id = 'local';
-      let owner = 'local';
-      let stagingRel = `workspaces/local/${loaded.config.project}`;
+      // Mutagen runs on this machine; the ssh host does not matter for list and terminate.
+      const mutagen = this.ssh(sshHost ?? '', user?.identityFile);
+      const previousNames = previous ? workspaceSessionNames(previous) : [];
+      const allSessions = await mutagen.list();
+      // A session of ours is alive only when it still syncs this checkout.
+      const live = new Set(allSessions.filter((session) => session.alphaPath === configDir).map((session) => session.name));
+      let id = checkoutId(configDir);
+      let stagingRel = `workspaces/local/${project}/${id}`;
       let workerId: string | undefined;
-      if (!direct) {
+      let reused: WorkspaceState | null = null;
+      if (direct) {
+        if (previous?.direct && previous.id === id) reused = previous;
+      } else {
         if (!user) return ExitCode.Auth;
-        const created = await this.api(user).createWorkspace(loaded.config.project);
-        id = created.id;
-        owner = created.ownerId;
-        stagingRel = created.stagingRel;
-        const selected = await this.api(user).selectWorker({
-          requires: [],
-          workspaceId: id,
-        });
+        const api = this.api(user);
+        const existing = previous && !previous.direct ? await findWorkspace(api, previous.id) : null;
+        if (existing && existing.stagingRel.endsWith(`/${existing.id}`)) {
+          id = existing.id;
+          stagingRel = existing.stagingRel;
+          reused = previous;
+        } else {
+          // The workspace is gone on the API, or it still has the old shared folder: its sessions are stale.
+          await terminateAll(mutagen, previousNames.filter((old) => live.has(old)));
+          live.clear();
+          if (existing) {
+            await api.deleteWorkspace(existing.id);
+            if (!this.json) output.info(`workspace ${existing.id} used the old shared folder; making a new one`);
+          }
+          const created = await api.createWorkspace(project);
+          id = created.id;
+          stagingRel = created.stagingRel;
+        }
+        const selected = await api.selectWorker({ requires: [], workspaceId: id });
         if (selected?.sshHost) {
           sshHost = selected.sshHost;
           workerId = selected.id;
@@ -115,30 +145,58 @@ export class TestboxApp {
         output.error('ssh host is required (testbox.yml sshHost, login, or --ssh-host)');
         return ExitCode.JobFailed;
       }
-      const name = sessionName(loaded.config.project, workerId ? id : owner, workerId);
-      const ssh = this.ssh(sshHost, user?.identityFile);
-      await ssh.ensureStaging(remoteRoot, stagingRel);
-      await ssh.create({
-        name,
-        source: path.dirname(loaded.file),
-        destination: mutagenDestination(sshHost, remoteRoot, stagingRel),
-        ignore: loaded.config.ignore,
-      });
+      // Keep the live sessions of a reused workspace. Keep the session for this host if it is alive.
+      const sessions: Record<string, WorkerSession> = {};
+      for (const [key, session] of Object.entries(reused?.sessions ?? {})) {
+        if (live.has(session.sessionName)) sessions[key] = session;
+      }
+      const current = workerId
+        ? sessions[workerId]
+        : reused && { sessionName: reused.sessionName, sshHost: reused.sshHost };
+      let name = sessionName(project, id, workerId);
+      const keep = Boolean(current && current.sshHost === sshHost && live.has(current.sessionName));
+      if (current && keep) {
+        name = current.sessionName;
+      } else if (workerId) {
+        // The session for this worker is gone, or it points at another host: replace it.
+        delete sessions[workerId];
+      }
+      if (workerId) sessions[workerId] = { sessionName: name, sshHost };
+      for (const root of otherRootsSyncingTo(allSessions, stagingRel, configDir)) {
+        output.error(`warning: ${root} also syncs to this worker folder; run testbox stop there, then testbox start here`);
+      }
       const state: WorkspaceState = {
         id,
-        project: loaded.config.project,
+        project,
         sessionName: name,
         stagingRel,
         sshHost,
         remoteRoot,
         direct,
-        configDir: path.dirname(loaded.file),
+        configDir,
         workerId,
-        sessions: workerId ? { [workerId]: { sessionName: name, sshHost } } : undefined,
+        sessions: Object.keys(sessions).length > 0 ? sessions : undefined,
       };
-      await writeWorkspaceState(path.dirname(loaded.file), state);
+      // The state names the session before the session exists, so a concurrent prune keeps it.
+      await writeWorkspaceState(configDir, state);
+      if (!keep) {
+        const kept = new Set(Object.values(sessions).map((session) => session.sessionName));
+        kept.delete(name);
+        await terminateAll(mutagen, previousNames.filter((old) => live.has(old) && !kept.has(old)));
+        const ssh = this.ssh(sshHost, user?.identityFile);
+        await ssh.ensureStaging(remoteRoot, stagingRel);
+        await ssh.create({
+          name,
+          source: configDir,
+          destination: mutagenDestination(sshHost, remoteRoot, stagingRel),
+          ignore: loaded.config.ignore,
+        });
+      }
       output.summary({ jobId: id, state: 'started', exitCode: 0 });
-      if (!this.json) output.info(`session ${name}`);
+      if (!this.json) {
+        if (reused) output.info(`reused workspace ${id}`);
+        output.info(`session ${name}`);
+      }
       return ExitCode.Pass;
     } catch (err) {
       return this.fail(output, err);
@@ -155,18 +213,7 @@ export class TestboxApp {
         return ExitCode.JobFailed;
       }
       const user = await readUserConfig(this.io.homeDir);
-      const ssh = this.ssh(state.sshHost, user?.identityFile);
-      const names = new Set<string>([
-        state.sessionName,
-        ...Object.values(state.sessions ?? {}).map((session) => session.sessionName),
-      ]);
-      for (const name of names) {
-        try {
-          await ssh.terminate(name);
-        } catch (err) {
-          if (!(err instanceof SyncError)) throw err;
-        }
-      }
+      await terminateAll(this.ssh(state.sshHost, user?.identityFile), workspaceSessionNames(state));
       if (!state.direct && user) {
         try {
           await this.api(user).deleteWorkspace(state.id);
@@ -208,7 +255,8 @@ export class TestboxApp {
       const user = await this.requireUser(false);
       if (!user) return ExitCode.Auth;
       const { job } = await this.api(user).getJob(jobId);
-      output.summary({ jobId: job.id, state: job.state, exitCode: job.exitCode, error: job.error });
+      output.summary({ jobId: job.id, state: job.state, exitCode: job.exitCode, error: job.error, source: job.source ?? undefined });
+      if (!this.json && job.source) output.info(formatJobSource(job.source));
       return exitCodeForJob(job.state);
     } catch (err) {
       return this.fail(output, err);
@@ -300,6 +348,9 @@ export class TestboxApp {
       }
       const ssh = this.ssh(state.sshHost, user?.identityFile);
       await ssh.flush(state.sessionName);
+      const source = await collectSource(this.io.remote, path.dirname(loaded.file));
+      if (this.json) output.event({ type: 'source', ...source });
+      else output.info(formatJobSource(source));
       if (flags.direct) {
         return this.direct(ssh, state, command, output, flags);
       }
@@ -335,6 +386,7 @@ export class TestboxApp {
         priority: flags.priority ? Number(flags.priority) : 0,
         timeoutMs: this.timeoutMs(flags),
         targetWorkerId,
+        source,
       });
       output.event({ type: 'status', state: created.job.state, jobId: created.job.id });
       if (flags.detach) {
@@ -484,6 +536,8 @@ export class TestboxApp {
       return next;
     }
     const name = sessionName(state.project, state.id, worker.id);
+    // The worker moved to another host: its old session must go before the name is used again.
+    if (existing) await terminateAll(ssh, [existing.sessionName]);
     await ssh.ensureStaging(state.remoteRoot, state.stagingRel);
     await ssh.create({
       name,
@@ -516,7 +570,7 @@ export class TestboxApp {
       return {
         id: workspace.id,
         project: workspace.project,
-        sessionName: state?.sessionName ?? sessionName(config.project, workspace.ownerId),
+        sessionName: state?.sessionName ?? sessionName(config.project, workspace.id),
         stagingRel: workspace.stagingRel,
         sshHost: flags.sshHost || state?.sshHost || user.sshHost || config.sshHost || '',
         remoteRoot: state?.remoteRoot ?? user.remoteRoot ?? '~/testbox',
@@ -563,5 +617,39 @@ export class TestboxApp {
     const mapped = exitCodeForCliError(err);
     output.error(err instanceof Error ? err.message : 'failed');
     return mapped ?? ExitCode.JobFailed;
+  }
+}
+
+/** Stable id for one checkout directory, so two checkouts of a repo get two folders on the worker. */
+function checkoutId(dir: string): string {
+  return createHash('sha256').update(dir).digest('hex').slice(0, 12);
+}
+
+/** Local roots other than `configDir` with a testbox session into the worker folder `stagingRel`. */
+function otherRootsSyncingTo(sessions: MutagenSessionInfo[], stagingRel: string, configDir: string): string[] {
+  const roots = new Set<string>();
+  for (const session of sessions) {
+    if (!session.name.startsWith('testbox-') || session.alphaPath === configDir) continue;
+    if (session.betaUrl.endsWith(`/${stagingRel}`)) roots.add(session.alphaPath);
+  }
+  return [...roots];
+}
+
+async function findWorkspace(api: HttpApi, id: string): Promise<{ id: string; stagingRel: string } | null> {
+  try {
+    return await api.getWorkspace(id);
+  } catch (err) {
+    if (err instanceof CliApiError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+async function terminateAll(mutagen: MutagenSsh, names: string[]): Promise<void> {
+  for (const name of names) {
+    try {
+      await mutagen.terminate(name);
+    } catch (err) {
+      if (!(err instanceof SyncError)) throw err;
+    }
   }
 }

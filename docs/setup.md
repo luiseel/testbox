@@ -123,7 +123,7 @@ To update the CLI: `git pull`, then `./scripts/install-cli.sh`.
 | control plane | `~/testbox/app/.compose-up.log` | the last `docker compose up` output |
 | worker | `~/testbox/app` | the checkout (or a link to it) |
 | worker | `~/testbox/bin` | `node`, `flock`, `mise` for the service and SSH |
-| worker | `~/testbox/workspaces`, `snapshots`, `cache` | synced trees, job copies, warm dependencies |
+| worker | `~/testbox/workspaces`, `snapshots`, `cache` | synced trees (one folder for each checkout: `workspaces/<user>/<project>/<workspace id>`), job copies, warm dependencies |
 | worker | `~/testbox/logs/worker.stderr.log`, `worker.stdout.log` | the macOS worker log (Linux: `journalctl --user -u testbox-worker`) |
 | worker | `~/testbox/worker.yml` | optional extra `labels:` |
 

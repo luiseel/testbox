@@ -37,6 +37,20 @@ describe('job store', () => {
     }
   });
 
+  it('keeps the job source and reads a record stored without it as null', async () => {
+    const { store, client, close } = await openStore();
+    try {
+      const source = { path: '/Users/ana/code/app', branch: 'TGN-811', commit: '3edf65d', dirty: true };
+      const record = baseJob(store.prefix, { source });
+      await store.createJob(record);
+      expect((await store.getJob(record.id))?.source).toEqual(source);
+      await client.hdel(store.k(`job:${record.id}`), 'source');
+      expect((await store.getJob(record.id))?.source).toBeNull();
+    } finally {
+      await close();
+    }
+  });
+
   it('times out a lease and does not renew a finished job', async () => {
     const { store, close } = await openStore();
     try {
@@ -83,6 +97,7 @@ function baseJob(prefix: string, patch: Partial<JobRecord> = {}): JobRecord {
     endedAt: null,
     workerId: null,
     targetWorkerId: null,
+    source: null,
     attemptId: null,
     exitCode: null,
     error: null,
@@ -95,11 +110,12 @@ function baseJob(prefix: string, patch: Partial<JobRecord> = {}): JobRecord {
   };
 }
 
-async function openStore(): Promise<{ store: JobStore; close: () => Promise<void> }> {
+async function openStore(): Promise<{ store: JobStore; client: IORedis; close: () => Promise<void> }> {
   const prefix = `store_${Math.random().toString(16).slice(2)}`;
   const client = new IORedis(process.env.TESTBOX_TEST_REDIS_URL ?? 'redis://127.0.0.1:6379', { maxRetriesPerRequest: null });
   return {
     store: new JobStore(client, prefix),
+    client,
     close: async () => {
       await client.quit();
     },

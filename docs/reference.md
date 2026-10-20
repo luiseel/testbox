@@ -9,15 +9,16 @@ Run `testbox <command> --help` for every option.
 | Command | What it does |
 | --- | --- |
 | `setup --api-url URL --token TOKEN` | Installs Mutagen if missing, logs in, makes an SSH key if there is none, then runs `doctor`. |
-| `doctor` | Checks the API, the token, Mutagen, each worker, and the profiles in `testbox.yml`. Prints a fix for each problem. |
+| `doctor` | Checks the API, the token, Mutagen, stale syncs, each worker, and the profiles in `testbox.yml`. Prints a fix for each problem. A stale sync has a deleted checkout, or no `.testbox/workspace.json` names it. Two checkouts that sync to the same worker folder also fail. |
 | `init [--force]` | Writes a starting `testbox.yml` for the repo. |
 | `login --api-url URL --token TOKEN [--ssh-host HOST]` | Stores the API URL and token in `~/.config/testbox/config.json` (mode 0600). |
-| `start` | Creates the workspace and starts the Mutagen sync. |
+| `start` | Creates the workspace and starts the Mutagen sync. You can run it again: it reuses the workspace and its live sessions. |
 | `verify <profile>` | Flush, snapshot, queue, and stream the profile's command. |
 | `run "<command>" [--profile NAME]` | The same, for any command. |
 | `status <job-id>`, `logs <job-id> [--follow]`, `cancel <job-id>` | One job. |
 | `artifacts <job-id>` | Downloads the job's artifacts into `./.testbox/<job-id>/`. |
 | `stop` | Stops the sync and deletes the workspace. |
+| `prune [--dry-run]` | Terminates the stale syncs on this machine. Live syncs stay. It does not use the API. With `--dry-run`, it only prints them. |
 
 Flags for `verify` and `run`: `--detach` (submit and return the job id), `--timeout <seconds>` (default 1800), `--priority <n>`, `--workspace <id>`, `--direct` (see [Without a control plane](#without-a-control-plane)), `--ssh-host <host>`, `--json` (NDJSON events and a final summary line). `start` takes the same flags. Ctrl-C on a terminal asks whether to cancel or detach; without a terminal it cancels.
 
@@ -98,11 +99,17 @@ Job states: `queued → assigned → running → succeeded | failed | cancelled 
 
 `verify` asks the API which worker will run the profile, then opens or reuses a Mutagen session to that worker (one-way, your machine → worker) and flushes it. Over SSH it then copies the synced tree to `~/testbox/snapshots/<id>` under a lock, and registers the snapshot's digest. The job is pinned to that worker, because the snapshot is only on its disk. You can continue to edit; the job uses the frozen copy.
 
+Each checkout of a repo gets its own workspace and its own folder on the worker: `~/testbox/workspaces/<user>/<project>/<workspace id>`. So a main checkout and a git worktree of one repo do not sync into the same folder. With `--direct`, the folder is `~/testbox/workspaces/local/<project>/<id>`, and the id is a short hash of the checkout directory.
+
+`start` writes the workspace to `.testbox/workspace.json`. You can run `start` again safely. When the API still has the workspace, `start` reuses it and keeps the Mutagen sessions that are alive. It makes a session only when one is missing. When the API does not have the workspace, `start` stops the old sessions and makes a new workspace. With `--direct`, `start` stops the old session and makes it again.
+
+Workspaces from before this layout use `~/testbox/workspaces/<user>/<project>`. When `start` finds such a workspace, it stops its sessions, deletes it, and makes a new one in the new layout. `start` also warns when another checkout on your machine still syncs into the same worker folder. The old folders stay on the worker until you remove them.
+
 ## On the worker, for each job
 
-4. Runs the command with `bash -c` in its own process group, under `mise exec --` when step 2 ran. `$0` of that shell is `testbox-job:<job id>`, so the worker can find the process again after a crash and stop it. On cancel or timeout: SIGTERM to the group, then SIGKILL.
+5. Runs the command with `bash -c` in its own process group, under `mise exec --` when step 3 ran. `$0` of that shell is `testbox-job:<job id>`, so the worker can find the process again after a crash and stop it. On cancel or timeout: SIGTERM to the group, then SIGKILL.
 
-The job's environment has only `PATH`, `HOME`, `LANG`, `TERM`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `NODE_OPTIONS`, `PNPM_HOME`, `DEVELOPER_DIR`, `SSH_AUTH_SOCK`, `XPC_SERVICE_NAME`, `DISPLAY`, and `TESTBOX_JOB_ID`, plus `MISE_YES` and `MISE_TRUSTED_CONFIG_PATHS` when step 2 ran. The log masks the worker token, the bootstrap token, the Redis password, `Bearer …` values, and `token=`, `password=`, `secret=`, `api_key=`, `authorization=` values.
+The job's environment has only `PATH`, `HOME`, `LANG`, `TERM`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `NODE_OPTIONS`, `PNPM_HOME`, `DEVELOPER_DIR`, `SSH_AUTH_SOCK`, `XPC_SERVICE_NAME`, `DISPLAY`, and `TESTBOX_JOB_ID`, plus `MISE_YES` and `MISE_TRUSTED_CONFIG_PATHS` when step 3 ran. The log masks the worker token, the bootstrap token, the Redis password, `Bearer …` values, and `token=`, `password=`, `secret=`, `api_key=`, `authorization=` values.
 
 The API deletes job records, logs, and artifacts on the control plane after 7 days. Workers do not delete their snapshots (`~/testbox/snapshots`) or job logs (`~/testbox/logs`) yet. Workspaces and caches are kept.
 

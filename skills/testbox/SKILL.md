@@ -21,6 +21,7 @@ testbox run "<command>" --json         # any command, same flow
 ```
 
 - Always pass `--json`. It prints NDJSON events and a final summary line, in one ordered stream. Without it, stdout and stderr can arrive out of order through a pipe.
+- The first log line shows which checkout the job tested: `source: <path> <branch>@<commit>`, plus `(dirty)` when the tree had changes. Make sure it is the checkout you changed.
 - The default timeout is 1800 s. Set the Bash tool timeout to match, or use `--timeout <seconds>`. For long jobs, use `--detach` (prints the job id), then `testbox logs <job-id> --follow` or `testbox status <job-id>`.
 - Never run two `verify` calls for the same profile at once: a newer queued job cancels the older queued one (exit 13).
 - Artifacts: `testbox artifacts <job-id>` downloads them into `./.testbox/<job-id>/`.
@@ -69,6 +70,7 @@ Rules for good profiles:
 
 ## More
 
-- `testbox doctor`: checks the API, token, Mutagen, workers, and profiles, and prints a fix for each problem.
+- `testbox doctor`: checks the API, token, Mutagen, stale syncs, workers, and profiles, and prints a fix for each problem.
+- `testbox prune`: terminates the stale syncs (the checkout is deleted, or no workspace owns the sync). `--dry-run` only prints them.
 - `testbox <command> --help`: every option.
 - Full reference and troubleshooting: https://github.com/luiseel/testbox/tree/master/docs

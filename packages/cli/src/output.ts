@@ -1,3 +1,5 @@
+import type { JobSource } from '@testbox/shared';
+
 export interface TextSink {
   write(chunk: string): void;
 }
@@ -8,6 +10,7 @@ export interface Summary {
   exitCode: number | null;
   error?: string | null;
   ok?: boolean;
+  source?: JobSource;
 }
 
 export class Output {

@@ -15,7 +15,7 @@ import {
 describe('snapshots', () => {
   it('freezes staging contents and ignores secrets', async () => {
     const dataDir = await mkdtemp(path.join(os.tmpdir(), 'snap-'));
-    const stagingRel = 'workspaces/usr_a/demo';
+    const stagingRel = 'workspaces/usr_a/demo/ws_1';
     const staging = path.join(dataDir, stagingRel);
     await mkdir(path.join(staging, 'node_modules'), { recursive: true });
     await writeFile(path.join(staging, 'hello.txt'), 'v1\n');

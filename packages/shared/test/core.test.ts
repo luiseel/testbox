@@ -14,6 +14,7 @@ import {
   collectLockfiles,
   ensureDependencies,
   fingerprintDigest,
+  formatJobSource,
   isTerminal,
   matchGlob,
   needsDependencyRefresh,
@@ -23,6 +24,7 @@ import {
   redact,
   remoteBash,
   remoteHomeScript,
+  stagingRel,
 } from '../src';
 
 const exec = promisify(execFile);
@@ -84,6 +86,14 @@ describe('shell safety', () => {
     expect(() => remoteHomeScript('bad;touch', 'true')).toThrow(/unsafe remote path/);
     expect(quoteShellArg("a'b")).toBe(`'a'\\''b'`);
     await rm(abs, { recursive: true, force: true });
+  });
+});
+
+describe('staging paths', () => {
+  it('gives each workspace of one user and project its own folder', () => {
+    expect(stagingRel('usr_a', 'demo', 'ws_1')).toBe('workspaces/usr_a/demo/ws_1');
+    expect(stagingRel('usr_a', 'demo', 'ws_2')).not.toBe(stagingRel('usr_a', 'demo', 'ws_1'));
+    expect(() => stagingRel('usr_a', 'demo', '../ws_1')).toThrow(/workspace id/);
   });
 });
 
@@ -197,5 +207,17 @@ describe('glob and redaction', () => {
     expect(redacted).not.toContain('supersecretvalue');
     expect(redacted).not.toContain('abcdefghijklmnop');
     expect(redacted).toContain('[REDACTED]');
+  });
+});
+
+describe('job source', () => {
+  it.each([
+    [{ path: '/Users/ana/code/app', branch: 'TGN-811', commit: '3edf65d', dirty: true }, 'source: /Users/ana/code/app TGN-811@3edf65d (dirty)'],
+    [{ path: '/Users/ana/code/app', branch: 'main', commit: '3edf65d', dirty: false }, 'source: /Users/ana/code/app main@3edf65d'],
+    [{ path: '/Users/ana/code/app', commit: '3edf65d' }, 'source: /Users/ana/code/app 3edf65d'],
+    [{ path: '/Users/ana/code/app' }, 'source: /Users/ana/code/app'],
+    [{ path: '/Users/ana/code/app\nfake: line', branch: 'main\x1b[31m' }, 'source: /Users/ana/code/app fake: line main [31m'],
+  ])('formats %j as one log line', (source, line) => {
+    expect(formatJobSource(source)).toBe(line);
   });
 });
