@@ -100,7 +100,7 @@ export class TestboxApp {
       // Mutagen runs on this machine; the ssh host does not matter for list and terminate.
       const mutagen = this.ssh(sshHost ?? '', user?.identityFile);
       const previousNames = previous ? workspaceSessionNames(previous) : [];
-      const live = new Set(previousNames.length > 0 ? await mutagen.list() : []);
+      const live = new Set(previousNames.length > 0 ? (await mutagen.list()).map((session) => session.name) : []);
       let id = checkoutId(configDir);
       let stagingRel = `workspaces/local/${project}/${id}`;
       let workerId: string | undefined;

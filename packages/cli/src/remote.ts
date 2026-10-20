@@ -125,16 +125,6 @@ export class MutagenSsh {
     if (result.code !== 0) throw new SyncError(result.stderr || 'mutagen sync resume failed');
   }
 
-  /** Names of all Mutagen sessions that exist on this machine. */
-  async list(): Promise<string[]> {
-    const result = await this.runner.run('mutagen', buildMutagenListArgs());
-    if (result.code !== 0) throw new SyncError(result.stderr || 'mutagen sync list failed');
-    const text = result.stdout.trim();
-    if (!text) return [];
-    const sessions = JSON.parse(text) as { name?: string }[] | null;
-    return (sessions ?? []).map((session) => session.name ?? '').filter((name) => name.length > 0);
-  }
-
   async terminate(name: string): Promise<void> {
     const result = await this.runner.run('mutagen', buildMutagenTerminateArgs(name));
     if (result.code !== 0) throw new SyncError(result.stderr || 'mutagen sync terminate failed');

@@ -54,11 +54,6 @@ export function buildMutagenResumeArgs(name: string): string[] {
   return ['sync', 'resume', name];
 }
 
-/** Lists all sessions as one JSON array; each entry has a `name` field. */
-export function buildMutagenListArgs(): string[] {
-  return ['sync', 'list', '--template', '{{json .}}'];
-}
-
 export function buildMutagenTerminateArgs(name: string): string[] {
   assertSessionName(name);
   return ['sync', 'terminate', name];
