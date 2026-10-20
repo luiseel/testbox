@@ -107,12 +107,7 @@ Workspaces from before this layout use `~/testbox/workspaces/<user>/<project>`. 
 
 ## On the worker, for each job
 
-1. Writes the source as the first log line: the checkout path, the git branch, the commit, and `(dirty)` when the tree had changes. For example: `source: /Users/ana/code/app TGN-811@3edf65d (dirty)`. Without git, the line has only the path.
-2. Checks the snapshot digest.
-3. With `mise.toml`, `.mise.toml`, or `.tool-versions` in the snapshot (and `mise` on the worker): runs `mise install` with `MISE_YES=1` and `MISE_TRUSTED_CONFIG_PATHS=<data dir>`. A failure fails the job before the command runs.
-4. With `package.json` and `pnpm-lock.yaml`: links warm `node_modules` from this workspace's cache, or runs `pnpm install --frozen-lockfile` (with a shared `pnpm-store`) and stores the result. The cache key hashes the lockfiles (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `Podfile.lock`, `Package.resolved`, up to 6 directories deep), the Node version, the platform, the arch, and `xcodebuild -version`.
-5. Runs the command in its own process group, under `mise exec --` when step 3 ran. On cancel or timeout: SIGTERM to the group, then SIGKILL.
-6. Uploads the artifacts to the API, also when the job failed. It skips files larger than 50 MB. A failed upload fails the job.
+5. Runs the command with `bash -c` in its own process group, under `mise exec --` when step 3 ran. `$0` of that shell is `testbox-job:<job id>`, so the worker can find the process again after a crash and stop it. On cancel or timeout: SIGTERM to the group, then SIGKILL.
 
 The job's environment has only `PATH`, `HOME`, `LANG`, `TERM`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `NODE_OPTIONS`, `PNPM_HOME`, `DEVELOPER_DIR`, `SSH_AUTH_SOCK`, `XPC_SERVICE_NAME`, `DISPLAY`, and `TESTBOX_JOB_ID`, plus `MISE_YES` and `MISE_TRUSTED_CONFIG_PATHS` when step 3 ran. The log masks the worker token, the bootstrap token, the Redis password, `Bearer …` values, and `token=`, `password=`, `secret=`, `api_key=`, `authorization=` values.
 

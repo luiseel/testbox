@@ -112,7 +112,7 @@ function baseJob(prefix: string, patch: Partial<JobRecord> = {}): JobRecord {
 
 async function openStore(): Promise<{ store: JobStore; client: IORedis; close: () => Promise<void> }> {
   const prefix = `store_${Math.random().toString(16).slice(2)}`;
-  const client = new IORedis('redis://127.0.0.1:6379', { maxRetriesPerRequest: null });
+  const client = new IORedis(process.env.TESTBOX_TEST_REDIS_URL ?? 'redis://127.0.0.1:6379', { maxRetriesPerRequest: null });
   return {
     store: new JobStore(client, prefix),
     client,

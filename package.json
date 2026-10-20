@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty false",
-    "test": "bash scripts/ensure-redis.sh && pnpm -r --filter @testbox/shared --filter @testbox/worker --filter @testbox/api --filter @testbox/cli run test",
+    "test": "bash scripts/test.sh",
     "lint": "eslint .",
     "start:api": "node packages/api/dist/main.js",
     "start:worker": "node packages/worker/dist/main.js"

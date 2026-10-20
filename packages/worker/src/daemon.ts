@@ -2,6 +2,7 @@ import { mkdir, appendFile } from 'fs/promises';
 import path from 'path';
 import IORedis from 'ioredis';
 import {
+  buildShellSpawn,
   claimNextJob,
   DEFAULT_RETENTION_MS,
   directoryDigest,
@@ -245,7 +246,8 @@ export class Daemon {
         graceMs: this.opts.graceMs ?? 2_000,
         abortSignal: abort.signal,
         secrets: secretsFromEnv(this.env),
-        shell: mise ? { argv: miseExecArgv(['bash', '-c', job.command]) } : { command: job.command },
+        shell: mise ? { argv: miseExecArgv(jobShellArgv(job)) } : { command: job.command },
+        jobId: job.id,
         onSpawn: (pgid) => {
           void this.store.setPgid(job.id, pgid);
         },
@@ -444,4 +446,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
   const daemon = new Daemon(opts);
   await daemon.start();
   return daemon;
+}
+
+/** The job shell under `mise exec`, with the job marker as `$0` like the plain path. */
+function jobShellArgv(job: JobRecord): string[] {
+  const spec = buildShellSpawn(job.command, job.id);
+  return [spec.file, ...spec.args];
 }

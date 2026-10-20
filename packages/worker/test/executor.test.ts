@@ -92,6 +92,8 @@ describe('executor', () => {
         pgid = pid;
       },
     });
+    // macOS shows a new process's environment to ps only for a moment: look after it settles.
+    await new Promise((resolve) => setTimeout(resolve, 300));
     let owns = false;
     let other = true;
     await waitFor(async () => {
