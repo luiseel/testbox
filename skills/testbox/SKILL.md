@@ -69,6 +69,7 @@ Rules for good profiles:
 
 ## More
 
-- `testbox doctor`: checks the API, token, Mutagen, workers, and profiles, and prints a fix for each problem.
+- `testbox doctor`: checks the API, token, Mutagen, stale syncs, workers, and profiles, and prints a fix for each problem.
+- `testbox prune`: terminates the stale syncs (the checkout is deleted, or no workspace owns the sync). `--dry-run` only prints them.
 - `testbox <command> --help`: every option.
 - Full reference and troubleshooting: https://github.com/luiseel/testbox/tree/master/docs

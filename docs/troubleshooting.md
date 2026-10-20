@@ -27,6 +27,7 @@ The worker log is `~/testbox/logs/worker.stderr.log` on a Mac, and `journalctl -
 | Snapshot fails: `node: command not found` or `spawn flock ENOENT`. | The worker was set up before `testbox admin add-worker` existed. | `testbox admin add-worker <user>@<ip>`. |
 | `JAVA_HOME is not set` (or another missing tool). | The worker has no such tool on `PATH`. | Pin the tool in the repo's `mise.toml` and `requires: [mise]`. The worker runs `mise install` and `mise exec` for each job. |
 | `swift build` or `swift test` prints nothing and never ends on a Mac worker. | Swift Build hangs in a LaunchAgent session. | Use `swift test --build-system native` (`testbox init` writes this). |
+| A job tests files from another checkout, or old files. | A stale sync, or two syncs to the same worker folder (for example `testbox start` in two checkouts of one project). | `testbox doctor` names them. Then `testbox prune`, or `testbox stop` in the checkout you do not use. |
 | The last log lines look missing when you pipe `verify … 2>&1`. | The job's stdout and stderr are two streams; through one pipe they can arrive out of order. | Nothing is lost. Use `--json` for one ordered stream. |
 | `verify` exits 12 with `lease_expired`. | The worker stopped or lost Redis during the job. | `testbox doctor`, then run the job again. |
 | `verify` exits 20. | Your token is wrong or was replaced. | Ask an admin: `testbox admin add-user <your name>` prints a new `testbox setup` line. |
