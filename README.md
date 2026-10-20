@@ -79,7 +79,7 @@ For coding agents (Claude Code and others), install the skill: `npx skills add l
 pnpm install
 pnpm typecheck
 pnpm lint
-pnpm test        # needs redis-server; starts it on 127.0.0.1:6379 when none runs
+pnpm test        # starts its own Redis on a free port (redis-server, or Docker); needs flock (macOS: brew install flock)
 ```
 
 ```

@@ -8,7 +8,7 @@ import { Daemon, startDaemon } from '@testbox/worker';
 import { CleanupService } from '../src/cleanup.service';
 import { createApp } from '../src/create-app';
 
-const redisUrl = 'redis://127.0.0.1:6379';
+const redisUrl = process.env.TESTBOX_TEST_REDIS_URL ?? 'redis://127.0.0.1:6379';
 
 describe('queue and execution', () => {
   const open: { close: () => Promise<void> }[] = [];
