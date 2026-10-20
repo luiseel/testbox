@@ -46,8 +46,8 @@ testbox setup --api-url http://<control-plane-ip>:3000 --token <token>
 
 ```sh
 testbox init             # write testbox.yml for this repo, then edit it
-testbox start            # start syncing this checkout (safe to run again)
-testbox verify unit      # run the `unit` profile on a worker
+testbox verify unit      # run the `unit` profile on a worker (starts the sync the first time)
+testbox profiles         # the profiles in testbox.yml
 testbox doctor           # when something is wrong: each problem, with its fix
 ```
 
@@ -65,7 +65,7 @@ profiles:
     requires: [macos, xcode]
 ```
 
-For coding agents (Claude Code and others), install the skill: `npx skills add luiseel/testbox`.
+For coding agents (Claude Code and others), install the skill: `npx skills add luiseel/testbox`. Agents run `testbox verify <profile> --json --quiet`: one NDJSON stream that ends with a summary line (`exit`, `hint`, `logFile`), the full log in `.testbox/logs/<job-id>.log`, and exit 2 when the call itself is wrong. [docs/reference.md](docs/reference.md#output-with---json) lists the events.
 
 `requires` lists worker labels. Labels pick the machine; you never name a host. `worker:<id>` targets one worker.
 
@@ -83,6 +83,8 @@ pnpm typecheck
 pnpm lint
 pnpm test        # starts its own Redis on a free port (redis-server, or Docker); needs flock (macOS: brew install flock)
 ```
+
+[AGENTS.md](AGENTS.md) says how to verify a change and where the code is, for people and coding agents.
 
 ```
 packages/shared   states, fingerprints, snapshot lock, job store, shell quoting

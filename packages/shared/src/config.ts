@@ -40,14 +40,27 @@ const configSchema = z.object({
   profiles: z.record(profileSchema).default({}),
 });
 
+/** testbox.yml is missing or invalid. The CLI exits 2 for it, not 1. */
+export class ConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConfigError';
+  }
+}
+
 export type ProfileConfig = z.infer<typeof profileSchema>;
 export type TestboxConfig = z.infer<typeof configSchema>;
 
 export function parseTestboxConfig(text: string): TestboxConfig {
-  const raw = parse(text);
+  let raw: unknown;
+  try {
+    raw = parse(text);
+  } catch (err) {
+    throw new ConfigError(`invalid testbox.yml: ${err instanceof Error ? err.message : String(err)}`);
+  }
   const result = configSchema.safeParse(raw);
   if (!result.success) {
-    throw new Error(`invalid testbox.yml: ${result.error.issues.map((i) => i.message).join('; ')}`);
+    throw new ConfigError(`invalid testbox.yml: ${result.error.issues.map((i) => i.message).join('; ')}`);
   }
   return result.data;
 }
@@ -67,5 +80,5 @@ export async function loadRepoConfig(startDir: string): Promise<{ file: string; 
     if (parent === dir) break;
     dir = parent;
   }
-  throw new Error(`testbox.yml not found from ${startDir}`);
+  throw new ConfigError(`testbox.yml not found from ${startDir}; run testbox init in the repo root`);
 }

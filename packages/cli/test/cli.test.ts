@@ -160,7 +160,8 @@ describe('cli', () => {
       expect(sync).toBe(10);
 
       const queued = await runCli(['verify', 'missing'], io(home, project, remote, stdout, stderr));
-      expect(queued).toBe(1);
+      expect(queued).toBe(2);
+      expect(stderr.join('')).toContain('unknown profile missing; the profiles in');
     } finally {
       await rm(home, { recursive: true, force: true });
       await rm(project, { recursive: true, force: true });
