@@ -92,7 +92,7 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
 
   program
     .command('prune')
-    .description('terminate testbox syncs whose checkout is deleted or no longer owns them')
+    .description('terminate stale testbox syncs: the checkout is deleted, or it does not own the sync')
     .option('--dry-run', 'only print the syncs it would terminate')
     .action(async (opts: { dryRun?: boolean }) => {
       code = await developerApp.prune(Boolean(opts.dryRun));

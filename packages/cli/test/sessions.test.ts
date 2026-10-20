@@ -160,7 +160,7 @@ describe('testbox prune and doctor', () => {
     const out: string[] = [];
     const err: string[] = [];
     try {
-      expect(await runCli(['prune'], io(home, remote, out, err))).toBe(0);
+      expect(await runCli(['prune'], io(home, remote, out, err))).toBe(10);
       expect(terminated).toEqual(['testbox-demo-dup', 'testbox-demo-gone']);
       const text = out.join('');
       expect(text).toContain(`terminated testbox-demo-gone (root deleted: ${path.join(home, 'deleted')})`);

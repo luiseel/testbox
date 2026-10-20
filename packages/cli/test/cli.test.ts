@@ -116,7 +116,7 @@ describe('cli', () => {
       );
       const start = await runCli(['start', '--direct', '--ssh-host', 'testbox'], io(home, project, remote, stdout, stderr));
       expect(start).toBe(0);
-      const create = calls.find((call) => call.file === 'mutagen');
+      const create = calls.find((call) => call.file === 'mutagen' && call.args[1] === 'create');
       expect(create?.args[0]).toBe('sync');
       expect(create?.args).toContain('--sync-mode=one-way-replica');
       expect(create?.args.find((arg) => arg.startsWith('--name='))).toMatch(/^--name=testbox-demo-[0-9a-f]{12}$/);
@@ -460,7 +460,7 @@ describe('cli', () => {
       expect(await readState()).toMatchObject({ id: first.id, sessionName: first.sessionName });
       expect(workspaces.size).toBe(1);
       expect(mutagen.created).toHaveLength(1);
-      expect(mutagen.live).toEqual(new Set([first.sessionName]));
+      expect([...mutagen.live.keys()]).toEqual([first.sessionName]);
       expect(stderr.join('')).toContain('reused workspace ws_1');
 
       workspaces.clear();
@@ -468,11 +468,106 @@ describe('cli', () => {
       const replaced = await readState();
       expect(replaced.stagingRel).toBe('workspaces/usr_abc/demo/ws_2');
       expect(mutagen.created).toHaveLength(2);
-      expect(mutagen.live).toEqual(new Set([replaced.sessionName]));
+      expect([...mutagen.live.keys()]).toEqual([replaced.sessionName]);
       expect(mutagen.created.at(-1)?.destination).toBe('testbox@linux-1:~/testbox/workspaces/usr_abc/demo/ws_2');
     } finally {
       await rm(home, { recursive: true, force: true });
       await rm(project, { recursive: true, force: true });
+    }
+  });
+
+  it('replaces the session when the worker moves host, migrates an old shared folder, and ignores a copied state file', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
+    const project = await mkdtemp(path.join(os.tmpdir(), 'tb-proj-'));
+    const copy = await mkdtemp(path.join(os.tmpdir(), 'tb-copy-'));
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const { mkdir, readFile, cp } = await import('fs/promises');
+    await mkdir(path.join(home, '.config', 'testbox'), { recursive: true });
+    await writeFile(
+      path.join(home, '.config', 'testbox', 'config.json'),
+      JSON.stringify({ apiUrl: 'http://api.test', token: 'user-token-123456', remoteRoot: '~/testbox' }),
+    );
+    await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
+    const workspaces = new Map<string, { id: string; stagingRel: string; project: string; ownerId: string }>();
+    const deleted: string[] = [];
+    let nextId = 0;
+    let host = 'testbox@linux-1';
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v1/workspaces') && init?.method === 'POST') {
+        nextId += 1;
+        const id = `ws_${nextId}`;
+        const workspace = { id, stagingRel: `workspaces/usr_abc/demo/${id}`, project: 'demo', ownerId: 'usr_abc' };
+        workspaces.set(id, workspace);
+        return new Response(JSON.stringify(workspace), { status: 201 });
+      }
+      const match = /\/v1\/workspaces\/([^/]+)$/.exec(url);
+      if (match && init?.method === 'DELETE') {
+        deleted.push(match[1] ?? '');
+        workspaces.delete(match[1] ?? '');
+        return new Response('{"ok":true}', { status: 200 });
+      }
+      if (match && init?.method === 'GET') {
+        const workspace = workspaces.get(match[1] ?? '');
+        if (!workspace) return new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'workspace not found' } }), { status: 404 });
+        return new Response(JSON.stringify(workspace), { status: 200 });
+      }
+      if (url.endsWith('/workers/select')) {
+        return new Response(JSON.stringify({ worker: { id: 'linux-1', sshHost: host, labels: [] } }), { status: 201 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    const mutagen = fakeMutagen();
+    const readState = async (dir: string) =>
+      JSON.parse(await readFile(path.join(dir, '.testbox', 'workspace.json'), 'utf8')) as { id: string; sessionName: string; sshHost: string };
+    try {
+      // An old state file: the workspace still uses the shared folder of the old layout.
+      workspaces.set('ws_old', { id: 'ws_old', stagingRel: 'workspaces/usr_abc/demo', project: 'demo', ownerId: 'usr_abc' });
+      await mkdir(path.join(project, '.testbox'), { recursive: true });
+      await writeFile(
+        path.join(project, '.testbox', 'workspace.json'),
+        JSON.stringify({
+          id: 'ws_old',
+          project: 'demo',
+          sessionName: 'testbox-demo-ws-old-linux-1',
+          stagingRel: 'workspaces/usr_abc/demo',
+          sshHost: host,
+          remoteRoot: '~/testbox',
+          direct: false,
+          configDir: project,
+          workerId: 'linux-1',
+          sessions: { 'linux-1': { sessionName: 'testbox-demo-ws-old-linux-1', sshHost: host } },
+        }),
+      );
+      mutagen.live.set('testbox-demo-ws-old-linux-1', { source: project, destination: `${host}:~/testbox/workspaces/usr_abc/demo` });
+      expect(await runCli(['start'], { ...io(home, project, mutagen.remote, stdout, stderr), fetchImpl })).toBe(0);
+      const first = await readState(project);
+      expect(first.id).toBe('ws_1');
+      expect(deleted).toEqual(['ws_old']);
+      expect(mutagen.live.has('testbox-demo-ws-old-linux-1')).toBe(false);
+      expect([...mutagen.live.keys()]).toEqual([first.sessionName]);
+
+      // The same worker answers from another host: the old session goes, a new one comes, no duplicate name.
+      host = 'testbox@10.0.0.9';
+      expect(await runCli(['start'], { ...io(home, project, mutagen.remote, stdout, stderr), fetchImpl })).toBe(0);
+      const moved = await readState(project);
+      expect(moved.id).toBe('ws_1');
+      expect(moved.sshHost).toBe(host);
+      expect([...mutagen.live.keys()]).toEqual([moved.sessionName]);
+      expect(mutagen.created.at(-1)?.destination).toBe('testbox@10.0.0.9:~/testbox/workspaces/usr_abc/demo/ws_1');
+
+      // A copy of the checkout, state file included, gets its own workspace and leaves the original's session alone.
+      await cp(project, copy, { recursive: true });
+      expect(await runCli(['start'], { ...io(home, copy, mutagen.remote, stdout, stderr), fetchImpl })).toBe(0);
+      const copied = await readState(copy);
+      expect(copied.id).toBe('ws_2');
+      expect(mutagen.live.has(moved.sessionName)).toBe(true);
+      expect(mutagen.live.get(copied.sessionName)?.source).toBe(copy);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+      await rm(project, { recursive: true, force: true });
+      await rm(copy, { recursive: true, force: true });
     }
   });
 });
@@ -533,7 +628,7 @@ function fakeRemote(calls: { file: string; args: string[] }[]): RemoteRunner {
 
 /** A Mutagen stand-in that remembers which sessions exist, so tests can see leaked sessions. */
 function fakeMutagen() {
-  const live = new Set<string>();
+  const live = new Map<string, { source: string; destination: string }>();
   const created: { name: string; source: string; destination: string }[] = [];
   const remote: RemoteRunner = {
     async run(file, args) {
@@ -541,10 +636,13 @@ function fakeMutagen() {
       const [, verb] = args;
       if (verb === 'create') {
         const name = (args.find((arg) => arg.startsWith('--name=')) ?? '').slice('--name='.length);
-        live.add(name);
-        created.push({ name, source: args.at(-2) ?? '', destination: args.at(-1) ?? '' });
+        if (live.has(name)) return { code: 1, stdout: '', stderr: `session name "${name}" already in use` };
+        const session = { source: args.at(-2) ?? '', destination: args.at(-1) ?? '' };
+        live.set(name, session);
+        created.push({ name, ...session });
       } else if (verb === 'list') {
-        return { code: 0, stdout: JSON.stringify([...live].map((name) => ({ name }))), stderr: '' };
+        const sessions = [...live].map(([name, session]) => ({ name, alpha: { path: session.source }, beta: { path: session.destination } }));
+        return { code: 0, stdout: JSON.stringify(sessions), stderr: '' };
       } else if (verb === 'terminate') {
         const name = args.at(-1) ?? '';
         if (!live.delete(name)) return { code: 1, stdout: '', stderr: 'no session' };

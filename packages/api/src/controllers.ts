@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Headers, Inject, Param, Post, Query, Req, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { z } from 'zod';
-import { AppError, isTerminal, JobStore, type JobRecord } from '@testbox/shared';
+import { AppError, isTerminal, JOB_SOURCE_MAX_LENGTH, JobStore, type JobRecord } from '@testbox/shared';
 import { listArtifactFiles, openArtifact, readRequestBody, saveArtifact } from './artifacts';
 import { AuthService } from './auth.service';
 import { AuthedRequest, Public, Roles } from './auth.guard';
@@ -168,9 +168,9 @@ export class JobsController {
         idempotencyKey: z.string().min(8).max(200).optional(),
         source: z
           .object({
-            path: z.string().min(1).max(500),
-            branch: z.string().max(500).optional(),
-            commit: z.string().max(500).optional(),
+            path: z.string().min(1).max(JOB_SOURCE_MAX_LENGTH),
+            branch: z.string().max(JOB_SOURCE_MAX_LENGTH).optional(),
+            commit: z.string().max(JOB_SOURCE_MAX_LENGTH).optional(),
             dirty: z.boolean().optional(),
           })
           .optional(),

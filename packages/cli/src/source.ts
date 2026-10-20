@@ -1,7 +1,5 @@
-import type { JobSource } from '@testbox/shared';
+import { cleanSourceField, type JobSource } from '@testbox/shared';
 import type { RemoteRunner } from './remote';
-
-const MAX_LENGTH = 500;
 
 /**
  * Read the path, git branch, commit, and dirty flag of a checkout.
@@ -16,13 +14,13 @@ export async function collectSource(runner: RemoteRunner, dir: string): Promise<
       return null;
     }
   };
-  const source: JobSource = { path: dir.slice(0, MAX_LENGTH) };
+  const source: JobSource = { path: cleanSourceField(dir) };
   const branch = await git(['rev-parse', '--abbrev-ref', 'HEAD']);
   if (branch === null) return source;
   const commit = await git(['rev-parse', '--short', 'HEAD']);
   const status = await git(['status', '--porcelain']);
-  if (branch) source.branch = branch.slice(0, MAX_LENGTH);
-  if (commit) source.commit = commit.slice(0, MAX_LENGTH);
+  if (branch) source.branch = cleanSourceField(branch);
+  if (commit) source.commit = cleanSourceField(commit);
   if (status !== null) source.dirty = status.length > 0;
   return source;
 }

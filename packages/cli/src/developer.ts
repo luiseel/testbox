@@ -6,7 +6,7 @@ import { CliApiError, HttpApi } from './api-client';
 import { TestboxApp, type CliIO } from './commands';
 import { readUserConfig, type UserConfig } from './config-store';
 import { MutagenSsh } from './remote';
-import { classifySessions, loadRootState } from './sessions';
+import { classifySessions, loadRootState, staleReason } from './sessions';
 
 interface Check {
   ok: boolean;
@@ -127,8 +127,9 @@ export class DeveloperApp {
     }
     const stale = report.sessions.filter((entry) => entry.kind !== 'live');
     let count = 0;
+    let failed = 0;
     for (const { session, kind } of stale) {
-      const reason = kind === 'missing-root' ? 'root deleted' : 'no workspace owns it';
+      const reason = staleReason(kind);
       let error: string | undefined;
       if (!dryRun) {
         try {
@@ -137,7 +138,8 @@ export class DeveloperApp {
           error = err instanceof Error ? err.message.trim() : String(err);
         }
       }
-      if (!error) count += 1;
+      if (error) failed += 1;
+      else count += 1;
       if (this.json) {
         this.io.stdout.write(
           `${JSON.stringify({ type: 'prune', name: session.name, root: session.alphaPath, reason, dryRun, ok: !error, error })}\n`,
@@ -153,7 +155,7 @@ export class DeveloperApp {
     } else {
       this.io.stdout.write(`${dryRun ? `${count} stale syncs to terminate` : `${count} stale syncs terminated`}\n`);
     }
-    return ExitCode.Pass;
+    return failed > 0 ? ExitCode.SyncError : ExitCode.Pass;
   }
 
   /** Write a starting testbox.yml from what the repo contains. */
@@ -246,7 +248,7 @@ export class DeveloperApp {
     const checks: Check[] = [];
     for (const { session, kind } of report.sessions) {
       if (kind === 'live') continue;
-      const reason = kind === 'missing-root' ? 'root deleted' : 'no workspace owns it';
+      const reason = staleReason(kind);
       checks.push({ ok: false, label: `sync ${session.name} (${reason}: ${session.alphaPath})`, fix: 'testbox prune' });
     }
     for (const conflict of report.conflicts) {

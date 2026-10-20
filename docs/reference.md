@@ -99,11 +99,11 @@ Job states: `queued → assigned → running → succeeded | failed | cancelled 
 
 `verify` asks the API which worker will run the profile, then opens or reuses a Mutagen session to that worker (one-way, your machine → worker) and flushes it. Over SSH it then copies the synced tree to `~/testbox/snapshots/<id>` under a lock, and registers the snapshot's digest. The job is pinned to that worker, because the snapshot is only on its disk. You can continue to edit; the job uses the frozen copy.
 
-Each checkout of a repo gets its own workspace and its own folder on the worker: `~/testbox/workspaces/<user>/<project>/<workspace id>`. Thus a main checkout and a git worktree of one repo do not sync into the same folder. With `--direct`, the folder is `~/testbox/workspaces/local/<project>/<id>`, and the id is a short hash of the checkout directory.
+Each checkout of a repo gets its own workspace and its own folder on the worker: `~/testbox/workspaces/<user>/<project>/<workspace id>`. So a main checkout and a git worktree of one repo do not sync into the same folder. With `--direct`, the folder is `~/testbox/workspaces/local/<project>/<id>`, and the id is a short hash of the checkout directory.
 
 `start` writes the workspace to `.testbox/workspace.json`. You can run `start` again safely. When the API still has the workspace, `start` reuses it and keeps the Mutagen sessions that are alive. It makes a session only when one is missing. When the API does not have the workspace, `start` stops the old sessions and makes a new workspace. With `--direct`, `start` stops the old session and makes it again.
 
-Workspaces from before this layout use `~/testbox/workspaces/<user>/<project>`, and they keep that folder. The old folders stay on the worker until you remove them.
+Workspaces from before this layout use `~/testbox/workspaces/<user>/<project>`. When `start` finds such a workspace, it stops its sessions, deletes it, and makes a new one in the new layout. `start` also warns when another checkout on your machine still syncs into the same worker folder. The old folders stay on the worker until you remove them.
 
 ## On the worker, for each job
 

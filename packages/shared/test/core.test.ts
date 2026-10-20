@@ -203,6 +203,7 @@ describe('job source', () => {
     [{ path: '/Users/ana/code/app', branch: 'main', commit: '3edf65d', dirty: false }, 'source: /Users/ana/code/app main@3edf65d'],
     [{ path: '/Users/ana/code/app', commit: '3edf65d' }, 'source: /Users/ana/code/app 3edf65d'],
     [{ path: '/Users/ana/code/app' }, 'source: /Users/ana/code/app'],
+    [{ path: '/Users/ana/code/app\nfake: line', branch: 'main\x1b[31m' }, 'source: /Users/ana/code/app fake: line main [31m'],
   ])('formats %j as one log line', (source, line) => {
     expect(formatJobSource(source)).toBe(line);
   });

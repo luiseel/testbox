@@ -29,6 +29,13 @@ export interface WorkspaceState {
   sessions?: Record<string, WorkerSession>;
 }
 
+/** Every Mutagen session name a workspace state refers to, without duplicates or empty names. */
+export function workspaceSessionNames(state: WorkspaceState): string[] {
+  const names = new Set<string>([state.sessionName]);
+  for (const session of Object.values(state.sessions ?? {})) names.add(session.sessionName);
+  return [...names].filter((name) => name.length > 0);
+}
+
 export function userConfigPath(homeDir: string): string {
   return path.join(homeDir, '.config', 'testbox', 'config.json');
 }
