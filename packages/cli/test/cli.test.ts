@@ -119,9 +119,9 @@ describe('cli', () => {
       const create = calls.find((call) => call.file === 'mutagen');
       expect(create?.args[0]).toBe('sync');
       expect(create?.args).toContain('--sync-mode=one-way-replica');
-      expect(create?.args).toContain('--name=testbox-demo-local');
+      expect(create?.args.find((arg) => arg.startsWith('--name='))).toMatch(/^--name=testbox-demo-[0-9a-f]{12}$/);
       expect(create?.args.at(-2)).toBe(project);
-      expect(create?.args.at(-1)).toBe('testbox:~/testbox/workspaces/local/demo');
+      expect(create?.args.at(-1)).toMatch(/^testbox:~\/testbox\/workspaces\/local\/demo\/[0-9a-f]{12}$/);
       expect(buildMutagenCreateArgs({
         name: 'demo',
         source: project,
@@ -195,7 +195,7 @@ describe('cli', () => {
         id: 'ws_123',
         project: 'demo',
         sessionName: 'testbox-demo-usr-abc',
-        stagingRel: 'workspaces/usr_abc/demo',
+        stagingRel: 'workspaces/usr_abc/demo/ws_123',
         sshHost: 'testbox',
         remoteRoot: '~/testbox',
         direct: false,
@@ -274,7 +274,7 @@ describe('cli', () => {
         id: 'ws_123',
         project: 'demo',
         sessionName: 'testbox-demo-usr-abc',
-        stagingRel: 'workspaces/usr_abc/demo',
+        stagingRel: 'workspaces/usr_abc/demo/ws_123',
         sshHost: 'testbox',
         remoteRoot: '~/testbox',
         direct: false,
@@ -321,7 +321,7 @@ describe('cli', () => {
     expect(synced).toBe(0);
     expect(pinned).toBe('mac-1');
     const created = calls.find((call) => call.file === 'mutagen' && call.args.includes('create'));
-    expect(created?.args.at(-1)).toBe('testbox@mac-1:~/testbox/workspaces/usr_abc/demo');
+    expect(created?.args.at(-1)).toBe('testbox@mac-1:~/testbox/workspaces/usr_abc/demo/ws_123');
     calls.length = 0;
     stderr.length = 0;
     const missing = await runCli(['verify', 'ios'], {
@@ -341,6 +341,93 @@ describe('cli', () => {
     expect(stderr.join('')).toContain('no registered worker can satisfy required labels: macos, xcode');
     await rm(home, { recursive: true, force: true });
     await rm(project, { recursive: true, force: true });
+  });
+
+  it('gives two checkouts of one repo two direct-mode folders and sessions', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
+    const main = await mkdtemp(path.join(os.tmpdir(), 'tb-main-'));
+    const worktree = await mkdtemp(path.join(os.tmpdir(), 'tb-worktree-'));
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const mutagen = fakeMutagen();
+    try {
+      for (const dir of [main, worktree]) {
+        await writeFile(path.join(dir, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
+        expect(await runCli(['start', '--direct', '--ssh-host', 'testbox'], io(home, dir, mutagen.remote, stdout, stderr))).toBe(0);
+      }
+      expect(mutagen.created.map((session) => session.source)).toEqual([main, worktree]);
+      const [first, second] = mutagen.created;
+      expect(first?.destination).not.toBe(second?.destination);
+      expect(first?.name).not.toBe(second?.name);
+      expect(mutagen.live.size).toBe(2);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+      await rm(main, { recursive: true, force: true });
+      await rm(worktree, { recursive: true, force: true });
+    }
+  });
+
+  it('reuses the workspace when start runs again and replaces it when the API lost it', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
+    const project = await mkdtemp(path.join(os.tmpdir(), 'tb-proj-'));
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const { mkdir, readFile } = await import('fs/promises');
+    await mkdir(path.join(home, '.config', 'testbox'), { recursive: true });
+    await writeFile(
+      path.join(home, '.config', 'testbox', 'config.json'),
+      JSON.stringify({ apiUrl: 'http://api.test', token: 'user-token-123456', sshHost: 'testbox', remoteRoot: '~/testbox' }),
+    );
+    await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
+    const workspaces = new Map<string, { id: string; stagingRel: string; project: string; ownerId: string }>();
+    let nextId = 0;
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/v1/workspaces') && init?.method === 'POST') {
+        nextId += 1;
+        const id = `ws_${nextId}`;
+        const workspace = { id, stagingRel: `workspaces/usr_abc/demo/${id}`, project: 'demo', ownerId: 'usr_abc' };
+        workspaces.set(id, workspace);
+        return new Response(JSON.stringify(workspace), { status: 201 });
+      }
+      const match = /\/v1\/workspaces\/([^/]+)$/.exec(url);
+      if (match && init?.method === 'GET') {
+        const workspace = workspaces.get(match[1] ?? '');
+        if (!workspace) return new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'workspace not found' } }), { status: 404 });
+        return new Response(JSON.stringify(workspace), { status: 200 });
+      }
+      if (url.endsWith('/workers/select')) {
+        return new Response(JSON.stringify({ worker: { id: 'linux-1', sshHost: 'testbox@linux-1', labels: [] } }), { status: 201 });
+      }
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    const mutagen = fakeMutagen();
+    const readState = async () =>
+      JSON.parse(await readFile(path.join(project, '.testbox', 'workspace.json'), 'utf8')) as { id: string; sessionName: string; stagingRel: string };
+    try {
+      expect(await runCli(['start'], { ...io(home, project, mutagen.remote, stdout, stderr), fetchImpl })).toBe(0);
+      const first = await readState();
+      expect(first.stagingRel).toBe('workspaces/usr_abc/demo/ws_1');
+
+      stderr.length = 0;
+      expect(await runCli(['start'], { ...io(home, project, mutagen.remote, stdout, stderr), fetchImpl })).toBe(0);
+      expect(await readState()).toMatchObject({ id: first.id, sessionName: first.sessionName });
+      expect(workspaces.size).toBe(1);
+      expect(mutagen.created).toHaveLength(1);
+      expect(mutagen.live).toEqual(new Set([first.sessionName]));
+      expect(stderr.join('')).toContain('reused workspace ws_1');
+
+      workspaces.clear();
+      expect(await runCli(['start'], { ...io(home, project, mutagen.remote, stdout, stderr), fetchImpl })).toBe(0);
+      const replaced = await readState();
+      expect(replaced.stagingRel).toBe('workspaces/usr_abc/demo/ws_2');
+      expect(mutagen.created).toHaveLength(2);
+      expect(mutagen.live).toEqual(new Set([replaced.sessionName]));
+      expect(mutagen.created.at(-1)?.destination).toBe('testbox@linux-1:~/testbox/workspaces/usr_abc/demo/ws_2');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+      await rm(project, { recursive: true, force: true });
+    }
   });
 });
 
@@ -371,4 +458,28 @@ function fakeRemote(calls: { file: string; args: string[] }[]): RemoteRunner {
       return { code: 0, stdout: '', stderr: '' };
     },
   };
+}
+
+/** A Mutagen stand-in that remembers which sessions exist, so tests can see leaked sessions. */
+function fakeMutagen() {
+  const live = new Set<string>();
+  const created: { name: string; source: string; destination: string }[] = [];
+  const remote: RemoteRunner = {
+    async run(file, args) {
+      if (file !== 'mutagen') return { code: 0, stdout: '', stderr: '' };
+      const [, verb] = args;
+      if (verb === 'create') {
+        const name = (args.find((arg) => arg.startsWith('--name=')) ?? '').slice('--name='.length);
+        live.add(name);
+        created.push({ name, source: args.at(-2) ?? '', destination: args.at(-1) ?? '' });
+      } else if (verb === 'list') {
+        return { code: 0, stdout: JSON.stringify([...live].map((name) => ({ name }))), stderr: '' };
+      } else if (verb === 'terminate') {
+        const name = args.at(-1) ?? '';
+        if (!live.delete(name)) return { code: 1, stdout: '', stderr: 'no session' };
+      }
+      return { code: 0, stdout: '', stderr: '' };
+    },
+  };
+  return { live, created, remote };
 }

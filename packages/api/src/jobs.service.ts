@@ -45,11 +45,12 @@ export class JobsService {
   ) {}
 
   async createWorkspace(ownerId: string, project: string): Promise<WorkspaceRecord> {
+    const id = createId('ws');
     const workspace: WorkspaceRecord = {
-      id: createId('ws'),
+      id,
       project,
       ownerId,
-      stagingRel: stagingRel(ownerId, project),
+      stagingRel: stagingRel(ownerId, project, id),
       createdAt: Date.now(),
     };
     await this.store.createWorkspace(workspace);

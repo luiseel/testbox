@@ -22,6 +22,7 @@ import {
   redact,
   remoteBash,
   remoteHomeScript,
+  stagingRel,
 } from '../src';
 
 const exec = promisify(execFile);
@@ -71,6 +72,14 @@ describe('shell safety', () => {
     expect(() => remoteHomeScript('bad;touch', 'true')).toThrow(/unsafe remote path/);
     expect(quoteShellArg("a'b")).toBe(`'a'\\''b'`);
     await rm(abs, { recursive: true, force: true });
+  });
+});
+
+describe('staging paths', () => {
+  it('gives each workspace of one user and project its own folder', () => {
+    expect(stagingRel('usr_a', 'demo', 'ws_1')).toBe('workspaces/usr_a/demo/ws_1');
+    expect(stagingRel('usr_a', 'demo', 'ws_2')).not.toBe(stagingRel('usr_a', 'demo', 'ws_1'));
+    expect(() => stagingRel('usr_a', 'demo', '../ws_1')).toThrow(/workspace id/);
   });
 });
 

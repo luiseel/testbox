@@ -22,10 +22,12 @@ export function resolveInside(root: string, rel: string): string {
   return abs;
 }
 
-export function stagingRel(userId: string, project: string): string {
+/** Each workspace (one checkout of a repo) gets its own folder, so two checkouts never sync into one folder. */
+export function stagingRel(userId: string, project: string, workspaceId: string): string {
   assertSafeSegment(userId, 'user id');
   assertSafeSegment(project, 'project');
-  return path.posix.join('workspaces', userId, project);
+  assertSafeSegment(workspaceId, 'workspace id');
+  return path.posix.join('workspaces', userId, project, workspaceId);
 }
 
 export function snapshotRel(snapshotId: string): string {

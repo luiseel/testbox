@@ -28,6 +28,7 @@ describe('queue and execution', () => {
     const bob = await user(ctx, 'bob');
     const ws = await call(ctx, alice.token, 'POST', '/v1/workspaces', { project: 'demo' });
     expect(ws.status).toBe(201);
+    expect(ws.json.stagingRel).toBe(`workspaces/${alice.id}/demo/${ws.json.id}`);
     const hidden = await call(ctx, bob.token, 'GET', `/v1/workspaces/${ws.json.id}`);
     expect(hidden.status).toBe(404);
     const denied = await call(ctx, '', 'POST', '/v1/jobs', {});

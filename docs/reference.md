@@ -12,7 +12,7 @@ Run `testbox <command> --help` for every option.
 | `doctor` | Checks the API, the token, Mutagen, each worker, and the profiles in `testbox.yml`. Prints a fix for each problem. |
 | `init [--force]` | Writes a starting `testbox.yml` for the repo. |
 | `login --api-url URL --token TOKEN [--ssh-host HOST]` | Stores the API URL and token in `~/.config/testbox/config.json` (mode 0600). |
-| `start` | Creates the workspace and starts the Mutagen sync. |
+| `start` | Creates the workspace and starts the Mutagen sync. You can run it again: it reuses the workspace and its live sessions. |
 | `verify <profile>` | Flush, snapshot, queue, and stream the profile's command. |
 | `run "<command>" [--profile NAME]` | The same, for any command. |
 | `status <job-id>`, `logs <job-id> [--follow]`, `cancel <job-id>` | One job. |
@@ -97,6 +97,12 @@ Job states: `queued → assigned → running → succeeded | failed | cancelled 
 ## Sync and snapshots
 
 `verify` asks the API which worker will run the profile, then opens or reuses a Mutagen session to that worker (one-way, your machine → worker) and flushes it. Over SSH it then copies the synced tree to `~/testbox/snapshots/<id>` under a lock, and registers the snapshot's digest. The job is pinned to that worker, because the snapshot is only on its disk. You can continue to edit; the job uses the frozen copy.
+
+Each checkout of a repo gets its own workspace and its own folder on the worker: `~/testbox/workspaces/<user>/<project>/<workspace id>`. Thus a main checkout and a git worktree of one repo do not sync into the same folder. With `--direct`, the folder is `~/testbox/workspaces/local/<project>/<id>`, and the id is a short hash of the checkout directory.
+
+`start` writes the workspace to `.testbox/workspace.json`. You can run `start` again safely. When the API still has the workspace, `start` reuses it and keeps the Mutagen sessions that are alive. It makes a session only when one is missing. When the API does not have the workspace, `start` stops the old sessions and makes a new workspace. With `--direct`, `start` stops the old session and makes it again.
+
+Workspaces from before this layout use `~/testbox/workspaces/<user>/<project>`, and they keep that folder. The old folders stay on the worker until you remove them.
 
 ## On the worker, for each job
 
