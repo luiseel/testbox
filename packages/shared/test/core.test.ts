@@ -9,6 +9,7 @@ import {
   assertTransition,
   buildFingerprint,
   buildShellSpawn,
+  commandLineHasJob,
   canTransition,
   collectLockfiles,
   ensureDependencies,
@@ -49,6 +50,18 @@ describe('shell safety', () => {
       file: 'bash',
       args: ['-c', 'pnpm test; echo hi $(whoami)'],
     });
+  });
+
+  it('marks a job shell in $0 and keeps bash as the leader', () => {
+    expect(buildShellSpawn('sleep 30', 'job_abc')).toEqual({
+      file: 'bash',
+      args: ['-c', 'sleep 30\nexit "$?"', 'testbox-job:job_abc'],
+    });
+    expect(() => buildShellSpawn('true', 'job x')).toThrow(/unsafe job id/);
+    const ps = '  12   ??  Ss  0:00.01 bash -c sleep 30\nexit "$?" testbox-job:job_abc PATH=/bin';
+    expect(commandLineHasJob(ps, 'job_abc')).toBe(true);
+    expect(commandLineHasJob(ps, 'job_ab')).toBe(false);
+    expect(commandLineHasJob('  12 sleep 30 TESTBOX_JOB_ID=job_abc HOME=/x', 'job_abc')).toBe(true);
   });
 
   it('quotes a payload so it cannot break out of the wrapper', async () => {
