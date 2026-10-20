@@ -9,7 +9,7 @@ Run `testbox <command> --help` for every option.
 | Command | What it does |
 | --- | --- |
 | `setup --api-url URL --token TOKEN` | Installs Mutagen if missing, logs in, makes an SSH key if there is none, then runs `doctor`. |
-| `doctor` | Checks the API, the token, Mutagen, each worker, and the profiles in `testbox.yml`. Prints a fix for each problem. |
+| `doctor` | Checks the API, the token, Mutagen, stale syncs, each worker, and the profiles in `testbox.yml`. Prints a fix for each problem. A stale sync has a deleted checkout, or no `.testbox/workspace.json` names it. Two checkouts that sync to the same worker folder also fail. |
 | `init [--force]` | Writes a starting `testbox.yml` for the repo. |
 | `login --api-url URL --token TOKEN [--ssh-host HOST]` | Stores the API URL and token in `~/.config/testbox/config.json` (mode 0600). |
 | `start` | Creates the workspace and starts the Mutagen sync. You can run it again: it reuses the workspace and its live sessions. |
@@ -18,6 +18,7 @@ Run `testbox <command> --help` for every option.
 | `status <job-id>`, `logs <job-id> [--follow]`, `cancel <job-id>` | One job. |
 | `artifacts <job-id>` | Downloads the job's artifacts into `./.testbox/<job-id>/`. |
 | `stop` | Stops the sync and deletes the workspace. |
+| `prune [--dry-run]` | Terminates the stale syncs on this machine. Live syncs stay. It does not use the API. With `--dry-run`, it only prints them. |
 
 Flags for `verify` and `run`: `--detach` (submit and return the job id), `--timeout <seconds>` (default 1800), `--priority <n>`, `--workspace <id>`, `--direct` (see [Without a control plane](#without-a-control-plane)), `--ssh-host <host>`, `--json` (NDJSON events and a final summary line). `start` takes the same flags. Ctrl-C on a terminal asks whether to cancel or detach; without a terminal it cancels.
 

@@ -5,6 +5,8 @@ import { buildSshArgs, ExitCode, loadRepoConfig } from '@testbox/shared';
 import { CliApiError, HttpApi } from './api-client';
 import { TestboxApp, type CliIO } from './commands';
 import { readUserConfig, type UserConfig } from './config-store';
+import { MutagenSsh } from './remote';
+import { classifySessions, loadRootState } from './sessions';
 
 interface Check {
   ok: boolean;
@@ -93,11 +95,11 @@ export class DeveloperApp {
       }
       throw err;
     }
-    add(
-      (await this.hasMutagen())
-        ? { ok: true, label: 'Mutagen' }
-        : { ok: false, label: 'Mutagen', fix: 'brew install mutagen-io/mutagen/mutagen' },
-    );
+    const mutagen = await this.hasMutagen();
+    add(mutagen ? { ok: true, label: 'Mutagen' } : { ok: false, label: 'Mutagen', fix: 'brew install mutagen-io/mutagen/mutagen' });
+    if (mutagen) {
+      for (const check of await this.checkSyncs()) add(check);
+    }
 
     const workers = (await api.listWorkers()) as Worker[];
     if (workers.length === 0) {
@@ -109,6 +111,49 @@ export class DeveloperApp {
     }
     for (const check of await this.checkProfiles(workers)) add(check);
     return checks.every((check) => check.ok) ? ExitCode.Pass : ExitCode.JobFailed;
+  }
+
+  /**
+   * Terminate the testbox syncs that no checkout owns: the local root is gone, or its
+   * .testbox/workspace.json names another session. Live syncs stay. The API is not used.
+   */
+  async prune(dryRun: boolean): Promise<number> {
+    let report;
+    try {
+      report = await classifySessions(await this.mutagen().list(), loadRootState);
+    } catch (err) {
+      this.io.stderr.write(`cannot list Mutagen syncs: ${err instanceof Error ? err.message.trim() : String(err)}\n`);
+      return ExitCode.SyncError;
+    }
+    const stale = report.sessions.filter((entry) => entry.kind !== 'live');
+    let count = 0;
+    for (const { session, kind } of stale) {
+      const reason = kind === 'missing-root' ? 'root deleted' : 'no workspace owns it';
+      let error: string | undefined;
+      if (!dryRun) {
+        try {
+          await this.mutagen().terminate(session.name);
+        } catch (err) {
+          error = err instanceof Error ? err.message.trim() : String(err);
+        }
+      }
+      if (!error) count += 1;
+      if (this.json) {
+        this.io.stdout.write(
+          `${JSON.stringify({ type: 'prune', name: session.name, root: session.alphaPath, reason, dryRun, ok: !error, error })}\n`,
+        );
+      } else if (error) {
+        this.io.stderr.write(`could not terminate ${session.name}: ${error}\n`);
+      } else {
+        this.io.stdout.write(`${dryRun ? 'would terminate' : 'terminated'} ${session.name} (${reason}: ${session.alphaPath})\n`);
+      }
+    }
+    if (this.json) {
+      this.io.stdout.write(`${JSON.stringify({ type: 'pruned', count, dryRun })}\n`);
+    } else {
+      this.io.stdout.write(`${dryRun ? `${count} stale syncs to terminate` : `${count} stale syncs terminated`}\n`);
+    }
+    return ExitCode.Pass;
   }
 
   /** Write a starting testbox.yml from what the repo contains. */
@@ -189,6 +234,35 @@ export class DeveloperApp {
           : 'no worker has these labels; change requires, or an admin adds a worker with --labels',
       };
     });
+  }
+
+  private async checkSyncs(): Promise<Check[]> {
+    let report;
+    try {
+      report = await classifySessions(await this.mutagen().list(), loadRootState);
+    } catch (err) {
+      return [{ ok: false, label: 'list Mutagen syncs', fix: `mutagen sync list failed: ${err instanceof Error ? err.message.trim() : String(err)}` }];
+    }
+    const checks: Check[] = [];
+    for (const { session, kind } of report.sessions) {
+      if (kind === 'live') continue;
+      const reason = kind === 'missing-root' ? 'root deleted' : 'no workspace owns it';
+      checks.push({ ok: false, label: `sync ${session.name} (${reason}: ${session.alphaPath})`, fix: 'testbox prune' });
+    }
+    for (const conflict of report.conflicts) {
+      checks.push({
+        ok: false,
+        label: `syncs from ${conflict.roots.join(' and ')} write to the same worker folder ${conflict.betaUrl}`,
+        fix: 'run testbox stop in the checkout you do not use',
+      });
+    }
+    if (checks.length === 0) checks.push({ ok: true, label: 'no stale syncs' });
+    return checks;
+  }
+
+  /** Mutagen commands that do not use SSH (list, terminate). */
+  private mutagen(): MutagenSsh {
+    return new MutagenSsh(this.io.remote, '');
   }
 
   private async hasMutagen(): Promise<boolean> {

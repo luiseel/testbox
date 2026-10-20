@@ -76,7 +76,7 @@ describe('testbox doctor', () => {
     await writeFile(path.join(home, 'testbox.yml'), 'project: demo\nprofiles:\n  ios:\n    cmd: xcodebuild test\n    requires: [xcode]\n  unit:\n    cmd: make\n');
     const remote: RemoteRunner = {
       async run(file, args): Promise<CommandResult> {
-        if (file === 'mutagen') return { code: 0, stdout: 'v0.18', stderr: '' };
+        if (file === 'mutagen') return { code: 0, stdout: args[1] === 'list' ? '[]' : 'v0.18', stderr: '' };
         if (args.includes('me@10.0.0.7')) return { code: 0, stdout: '', stderr: '' };
         return { code: 255, stdout: '', stderr: 'me@10.0.0.8: Permission denied (publickey).' };
       },
@@ -100,6 +100,7 @@ describe('testbox doctor', () => {
       expect(await runCli(['doctor'], io(home, home, remote, fetchImpl, out))).toBe(1);
       const text = out.join('');
       expect(text).toContain('✓ logged in as ana');
+      expect(text).toContain('✓ no stale syncs');
       expect(text).toContain('✓ linux-1 is up (linux)');
       expect(text).toContain('✓ SSH to me@10.0.0.7');
       expect(text).toContain('✗ mac-1 sends no heartbeat');

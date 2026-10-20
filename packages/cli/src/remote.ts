@@ -7,9 +7,11 @@ import {
   buildMutagenResumeArgs,
   buildMutagenTerminateArgs,
   buildSshArgs,
+  parseMutagenSessions,
   quoteShellArg,
   remoteBash,
   remoteHomeScript,
+  type MutagenSessionInfo,
 } from '@testbox/shared';
 
 export interface CommandResult {
@@ -136,6 +138,13 @@ export class MutagenSsh {
   async terminate(name: string): Promise<void> {
     const result = await this.runner.run('mutagen', buildMutagenTerminateArgs(name));
     if (result.code !== 0) throw new SyncError(result.stderr || 'mutagen sync terminate failed');
+  }
+
+  /** All Mutagen sync sessions on this machine, not only the sessions of this checkout. */
+  async list(): Promise<MutagenSessionInfo[]> {
+    const result = await this.runner.run('mutagen', buildMutagenListArgs(), { timeoutMs: 20_000 });
+    if (result.code !== 0) throw new SyncError(result.stderr || 'mutagen sync list failed');
+    return parseMutagenSessions(result.stdout);
   }
 
   async ssh(remoteCommand: string, timeoutMs?: number): Promise<CommandResult> {

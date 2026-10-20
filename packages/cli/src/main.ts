@@ -85,9 +85,17 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
 
   program
     .command('doctor')
-    .description('check the API, Mutagen, each worker, and the profiles in testbox.yml')
+    .description('check the API, Mutagen, stale syncs, each worker, and the profiles in testbox.yml')
     .action(async () => {
       code = await developerApp.doctor();
+    });
+
+  program
+    .command('prune')
+    .description('terminate testbox syncs whose checkout is deleted or no longer owns them')
+    .option('--dry-run', 'only print the syncs it would terminate')
+    .action(async (opts: { dryRun?: boolean }) => {
+      code = await developerApp.prune(Boolean(opts.dryRun));
     });
 
   program
