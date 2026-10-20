@@ -7,6 +7,7 @@ import {
   ExitCode,
   exitCodeForJob,
   fingerprintFromDirectory,
+  formatJobSource,
   loadRepoConfig,
   needsDependencyRefresh,
   sessionName,
@@ -29,6 +30,7 @@ import {
 import { attachInterrupt } from './interrupt';
 import { Output, type TextSink } from './output';
 import { mutagenDestination, MutagenSsh, RemoteUnavailable, SyncError, type RemoteRunner } from './remote';
+import { collectSource } from './source';
 
 export interface CliIO {
   stdout: TextSink;
@@ -243,6 +245,7 @@ export class TestboxApp {
       if (!user) return ExitCode.Auth;
       const { job } = await this.api(user).getJob(jobId);
       output.summary({ jobId: job.id, state: job.state, exitCode: job.exitCode, error: job.error });
+      if (!this.json && job.source) output.info(formatJobSource(job.source));
       return exitCodeForJob(job.state);
     } catch (err) {
       return this.fail(output, err);
@@ -338,6 +341,7 @@ export class TestboxApp {
         return this.direct(ssh, state, command, output, flags);
       }
       if (!user) return ExitCode.Auth;
+      const source = await collectSource(this.io.remote, path.dirname(loaded.file));
       const snapshotId = createId('snap');
       await ssh.pause(state.sessionName);
       let digested: { digest: string; relPath: string } | undefined;
@@ -369,7 +373,10 @@ export class TestboxApp {
         priority: flags.priority ? Number(flags.priority) : 0,
         timeoutMs: this.timeoutMs(flags),
         targetWorkerId,
+        source,
       });
+      if (this.json) output.event({ type: 'source', ...source });
+      else output.info(formatJobSource(source));
       output.event({ type: 'status', state: created.job.state, jobId: created.job.id });
       if (flags.detach) {
         output.summary({ jobId: created.job.id, state: created.job.state, exitCode: null });

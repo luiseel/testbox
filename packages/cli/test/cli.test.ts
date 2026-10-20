@@ -245,6 +245,52 @@ describe('cli', () => {
     await rm(project, { recursive: true, force: true });
   });
 
+  it('sends the checkout path, branch, commit, and dirty flag with the job, and only the path when git fails', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
+    const project = await mkdtemp(path.join(os.tmpdir(), 'tb-proj-'));
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    try {
+      await writeQueuedSetup(home, project);
+      const sent: unknown[] = [];
+      const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/snapshots')) return new Response(JSON.stringify({ id: 'snap', digest: 'ab'.repeat(32) }), { status: 201 });
+        if (url.endsWith('/jobs') && init?.method === 'POST') {
+          sent.push((JSON.parse(String(init.body)) as { source?: unknown }).source);
+          return new Response(JSON.stringify({ job: { id: 'job_123', state: 'queued', exitCode: null, error: null }, superseded: [] }), { status: 201 });
+        }
+        if (url.endsWith('/events')) {
+          return new Response('event: done\ndata: {"state":"succeeded","exitCode":0,"error":null}\n\n', { status: 200 });
+        }
+        return new Response('{}', { status: 200 });
+      }) as typeof fetch;
+      const remote = (git: (args: string[]) => CommandResult): RemoteRunner => ({
+        async run(file, args) {
+          if (file === 'git') return git(args);
+          if (file === 'ssh') return { code: 0, stdout: `${JSON.stringify({ digest: 'ab'.repeat(32), relPath: 'snapshots/snap' })}\n`, stderr: '' };
+          return { code: 0, stdout: '', stderr: '' };
+        },
+      });
+      const repo = remote((args) => {
+        if (args.includes('--abbrev-ref')) return { code: 0, stdout: 'TGN-811\n', stderr: '' };
+        if (args.includes('--short')) return { code: 0, stdout: '3edf65d\n', stderr: '' };
+        return { code: 0, stdout: ' M src/app.ts\n', stderr: '' };
+      });
+      expect(await runCli(['verify', 'unit'], { ...io(home, project, repo, stdout, stderr), fetchImpl })).toBe(0);
+      expect(sent[0]).toEqual({ path: project, branch: 'TGN-811', commit: '3edf65d', dirty: true });
+      expect(stderr.join('')).toContain(`source: ${project} TGN-811@3edf65d (dirty)\n`);
+
+      const noRepo = remote(() => ({ code: 128, stdout: '', stderr: 'fatal: not a git repository' }));
+      expect(await runCli(['verify', 'unit', '--json'], { ...io(home, project, noRepo, stdout, stderr), fetchImpl })).toBe(0);
+      expect(sent[1]).toEqual({ path: project });
+      expect(stdout.join('')).toContain(JSON.stringify({ type: 'source', path: project }));
+    } finally {
+      await rm(home, { recursive: true, force: true });
+      await rm(project, { recursive: true, force: true });
+    }
+  });
+
   it('syncs to the selected worker and exits 11 when no worker can run the profile', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
     const project = await mkdtemp(path.join(os.tmpdir(), 'tb-proj-'));
@@ -449,6 +495,31 @@ function io(
     prompt: async () => 'c',
     fetchImpl: (async () => new Response('{}', { status: 200 })) as typeof fetch,
   };
+}
+
+/** A logged-in user and a started workspace, so verify goes to the queue. */
+async function writeQueuedSetup(home: string, project: string): Promise<void> {
+  const { mkdir } = await import('fs/promises');
+  await mkdir(path.join(home, '.config', 'testbox'), { recursive: true });
+  await writeFile(
+    path.join(home, '.config', 'testbox', 'config.json'),
+    JSON.stringify({ apiUrl: 'http://api.test', token: 'user-token-123456', sshHost: 'testbox', remoteRoot: '~/testbox' }),
+  );
+  await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
+  await mkdir(path.join(project, '.testbox'), { recursive: true });
+  await writeFile(
+    path.join(project, '.testbox', 'workspace.json'),
+    JSON.stringify({
+      id: 'ws_123',
+      project: 'demo',
+      sessionName: 'testbox-demo-usr-abc',
+      stagingRel: 'workspaces/usr_abc/demo/ws_123',
+      sshHost: 'testbox',
+      remoteRoot: '~/testbox',
+      direct: false,
+      configDir: project,
+    }),
+  );
 }
 
 function fakeRemote(calls: { file: string; args: string[] }[]): RemoteRunner {

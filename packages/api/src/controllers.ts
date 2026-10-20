@@ -43,6 +43,7 @@ function publicJob(job: JobRecord): Omit<JobRecord, 'queueKey'> {
     endedAt: job.endedAt,
     workerId: job.workerId,
     targetWorkerId: job.targetWorkerId,
+    source: job.source,
     attemptId: job.attemptId,
     exitCode: job.exitCode,
     error: job.error,
@@ -165,6 +166,14 @@ export class JobsController {
         priority: z.number().int().min(0).max(999).optional(),
         timeoutMs: z.number().int().min(1000).max(24 * 60 * 60 * 1000).optional(),
         idempotencyKey: z.string().min(8).max(200).optional(),
+        source: z
+          .object({
+            path: z.string().min(1).max(500),
+            branch: z.string().max(500).optional(),
+            commit: z.string().max(500).optional(),
+            dirty: z.boolean().optional(),
+          })
+          .optional(),
       }),
       body,
     );

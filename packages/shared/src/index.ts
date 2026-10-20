@@ -13,6 +13,7 @@ export * from './snapshot';
 export * from './deps';
 export * from './mutagen';
 export * from './types';
+export * from './source';
 export * from './queue';
 export * from './job-store';
 export * from './schedule';

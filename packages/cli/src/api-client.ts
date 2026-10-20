@@ -1,4 +1,4 @@
-import { exitCodeForApiError, type JobState } from '@testbox/shared';
+import { exitCodeForApiError, type JobSource, type JobState } from '@testbox/shared';
 
 export class CliApiError extends Error {
   constructor(
@@ -23,6 +23,7 @@ interface JobPayload {
   error: string | null;
   profile: string | null;
   command: string;
+  source?: JobSource | null;
 }
 
 export class HttpApi {
@@ -117,6 +118,7 @@ export class HttpApi {
     priority?: number;
     timeoutMs?: number;
     targetWorkerId?: string;
+    source?: JobSource;
   }): Promise<{ job: JobPayload; superseded: string[] }> {
     return this.request('POST', '/v1/jobs', input);
   }

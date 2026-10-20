@@ -107,13 +107,14 @@ Workspaces from before this layout use `~/testbox/workspaces/<user>/<project>`, 
 
 ## On the worker, for each job
 
-1. Checks the snapshot digest.
-2. With `mise.toml`, `.mise.toml`, or `.tool-versions` in the snapshot (and `mise` on the worker): runs `mise install` with `MISE_YES=1` and `MISE_TRUSTED_CONFIG_PATHS=<data dir>`. A failure fails the job before the command runs.
-3. With `package.json` and `pnpm-lock.yaml`: links warm `node_modules` from this workspace's cache, or runs `pnpm install --frozen-lockfile` (with a shared `pnpm-store`) and stores the result. The cache key hashes the lockfiles (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `Podfile.lock`, `Package.resolved`, up to 6 directories deep), the Node version, the platform, the arch, and `xcodebuild -version`.
-4. Runs the command in its own process group, under `mise exec --` when step 2 ran. On cancel or timeout: SIGTERM to the group, then SIGKILL.
-5. Uploads the artifacts to the API, also when the job failed. It skips files larger than 50 MB. A failed upload fails the job.
+1. Writes the source as the first log line: the checkout path, the git branch, the commit, and `(dirty)` when the tree had changes. For example: `source: /Users/ana/code/app TGN-811@3edf65d (dirty)`. Without git, the line has only the path.
+2. Checks the snapshot digest.
+3. With `mise.toml`, `.mise.toml`, or `.tool-versions` in the snapshot (and `mise` on the worker): runs `mise install` with `MISE_YES=1` and `MISE_TRUSTED_CONFIG_PATHS=<data dir>`. A failure fails the job before the command runs.
+4. With `package.json` and `pnpm-lock.yaml`: links warm `node_modules` from this workspace's cache, or runs `pnpm install --frozen-lockfile` (with a shared `pnpm-store`) and stores the result. The cache key hashes the lockfiles (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `Podfile.lock`, `Package.resolved`, up to 6 directories deep), the Node version, the platform, the arch, and `xcodebuild -version`.
+5. Runs the command in its own process group, under `mise exec --` when step 3 ran. On cancel or timeout: SIGTERM to the group, then SIGKILL.
+6. Uploads the artifacts to the API, also when the job failed. It skips files larger than 50 MB. A failed upload fails the job.
 
-The job's environment has only `PATH`, `HOME`, `LANG`, `TERM`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `NODE_OPTIONS`, `PNPM_HOME`, `DEVELOPER_DIR`, `SSH_AUTH_SOCK`, `XPC_SERVICE_NAME`, `DISPLAY`, and `TESTBOX_JOB_ID`, plus `MISE_YES` and `MISE_TRUSTED_CONFIG_PATHS` when step 2 ran. The log masks the worker token, the bootstrap token, the Redis password, `Bearer …` values, and `token=`, `password=`, `secret=`, `api_key=`, `authorization=` values.
+The job's environment has only `PATH`, `HOME`, `LANG`, `TERM`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `NODE_OPTIONS`, `PNPM_HOME`, `DEVELOPER_DIR`, `SSH_AUTH_SOCK`, `XPC_SERVICE_NAME`, `DISPLAY`, and `TESTBOX_JOB_ID`, plus `MISE_YES` and `MISE_TRUSTED_CONFIG_PATHS` when step 3 ran. The log masks the worker token, the bootstrap token, the Redis password, `Bearer …` values, and `token=`, `password=`, `secret=`, `api_key=`, `authorization=` values.
 
 The API deletes job records, logs, and artifacts on the control plane after 7 days. Workers do not delete their snapshots (`~/testbox/snapshots`) or job logs (`~/testbox/logs`) yet. Workspaces and caches are kept.
 

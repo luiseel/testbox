@@ -13,6 +13,7 @@ import {
   collectLockfiles,
   ensureDependencies,
   fingerprintDigest,
+  formatJobSource,
   isTerminal,
   matchGlob,
   needsDependencyRefresh,
@@ -193,5 +194,16 @@ describe('glob and redaction', () => {
     expect(redacted).not.toContain('supersecretvalue');
     expect(redacted).not.toContain('abcdefghijklmnop');
     expect(redacted).toContain('[REDACTED]');
+  });
+});
+
+describe('job source', () => {
+  it.each([
+    [{ path: '/Users/ana/code/app', branch: 'TGN-811', commit: '3edf65d', dirty: true }, 'source: /Users/ana/code/app TGN-811@3edf65d (dirty)'],
+    [{ path: '/Users/ana/code/app', branch: 'main', commit: '3edf65d', dirty: false }, 'source: /Users/ana/code/app main@3edf65d'],
+    [{ path: '/Users/ana/code/app', commit: '3edf65d' }, 'source: /Users/ana/code/app 3edf65d'],
+    [{ path: '/Users/ana/code/app' }, 'source: /Users/ana/code/app'],
+  ])('formats %j as one log line', (source, line) => {
+    expect(formatJobSource(source)).toBe(line);
   });
 });
