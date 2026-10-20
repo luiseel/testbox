@@ -1,7 +1,7 @@
 import { spawn, execFile } from 'child_process';
 import { open } from 'fs/promises';
 import { promisify } from 'util';
-import { buildArgvSpawn, buildShellSpawn, redact } from '@testbox/shared';
+import { buildArgvSpawn, buildShellSpawn, commandLineHasJob, redact } from '@testbox/shared';
 
 const execFileAsync = promisify(execFile);
 
@@ -15,6 +15,8 @@ export interface RunCommandOptions {
   onSpawn?: (pgid: number) => void;
   secrets?: readonly string[];
   shell: { command: string } | { argv: string[] };
+  /** Marks the job shell for the orphan reaper. Defaults to `TESTBOX_JOB_ID` in `env`. */
+  jobId?: string;
 }
 
 export interface RunCommandResult {
@@ -37,17 +39,21 @@ export function killProcessGroup(pgid: number, signal: NodeJS.Signals): void {
   }
 }
 
+/**
+ * True when the process group leader still belongs to the job, so its pid was not
+ * reused. Linux: the environment in /proc. Everywhere: the arguments and the
+ * environment that `ps` shows (macOS hides the environment of system binaries).
+ */
 export async function processStillOwnsJob(pgid: number, jobId: string): Promise<boolean> {
   if (!Number.isInteger(pgid) || pgid <= 1) return false;
-  const marker = `TESTBOX_JOB_ID=${jobId}`;
   if (process.platform === 'linux') {
     const env = await readProcEnviron(pgid);
     if (env === null) return false;
-    if (env.length > 0) return env.includes(marker);
+    if (env.length > 0 && env.includes(`TESTBOX_JOB_ID=${jobId}`)) return true;
   }
   try {
     const { stdout } = await execFileAsync('ps', ['eww', '-p', String(pgid)]);
-    return stdout.includes(marker);
+    return commandLineHasJob(stdout, jobId);
   } catch {
     return false;
   }
@@ -112,7 +118,8 @@ function lineWriter(
  * so descendants are not left unreaped.
  */
 export async function runCommand(opts: RunCommandOptions): Promise<RunCommandResult> {
-  const spec = 'command' in opts.shell ? buildShellSpawn(opts.shell.command) : buildArgvSpawn(opts.shell.argv);
+  const jobId = opts.jobId ?? opts.env.TESTBOX_JOB_ID;
+  const spec = 'command' in opts.shell ? buildShellSpawn(opts.shell.command, jobId) : buildArgvSpawn(opts.shell.argv);
   const child = spawn(spec.file, spec.args, {
     cwd: opts.cwd,
     env: opts.env,

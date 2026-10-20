@@ -41,10 +41,31 @@ export function remoteBash(command: string, cwd?: string): string {
   return `bash -c ${quoteShellArg(script)}`;
 }
 
-/** Local execution. `command` is one argv element, not a concatenated shell line. */
-export function buildShellSpawn(command: string): { file: string; args: string[] } {
+const JOB_ID = /^[A-Za-z0-9_-]{1,100}$/;
+
+/** The `$0` of a job shell: a marker that `ps` shows in its arguments on every platform. */
+export function jobMarker(jobId: string): string {
+  if (!JOB_ID.test(jobId)) throw new Error('unsafe job id');
+  return `testbox-job:${jobId}`;
+}
+
+/** True when `ps` output (arguments or environment) carries the marker of this job. */
+export function commandLineHasJob(psOutput: string, jobId: string): boolean {
+  const marker = jobMarker(jobId);
+  return psOutput.split(/\s+/).includes(marker) || psOutput.split(/\s+/).includes(`TESTBOX_JOB_ID=${jobId}`);
+}
+
+/**
+ * Local execution. `command` is one argv element, not a concatenated shell line.
+ * With a job id, `$0` is the job marker and `exit "$?"` ends the script, so bash
+ * stays the group leader instead of exec-ing a single last command. macOS hides
+ * the environment of system binaries from `ps`, but never their arguments; the
+ * orphan reaper reads the marker from there.
+ */
+export function buildShellSpawn(command: string, jobId?: string): { file: string; args: string[] } {
   if (command.includes('\0')) throw new Error('command contains NUL');
-  return { file: 'bash', args: ['-c', command] };
+  if (jobId === undefined) return { file: 'bash', args: ['-c', command] };
+  return { file: 'bash', args: ['-c', `${command}\nexit "$?"`, jobMarker(jobId)] };
 }
 
 /**
