@@ -12,15 +12,16 @@ Run `testbox <command> --help` for every option.
 | `doctor` | Checks the API, the token, Mutagen, stale syncs, each worker, and the profiles in `testbox.yml`. Prints a fix for each problem. A stale sync has a deleted checkout, or no `.testbox/workspace.json` names it. Two checkouts that sync to the same worker folder also fail. |
 | `init [--force]` | Writes a starting `testbox.yml` for the repo. |
 | `login --api-url URL --token TOKEN [--ssh-host HOST]` | Stores the API URL and token in `~/.config/testbox/config.json` (mode 0600). |
-| `start` | Creates the workspace and starts the Mutagen sync. You can run it again: it reuses the workspace and its live sessions. |
-| `verify <profile>` | Flush, snapshot, queue, and stream the profile's command. |
+| `profiles` | Lists the profiles of `testbox.yml` (name, labels, command) and where the file is. With `--json`, one `profiles` event and a summary. |
+| `start` | Creates the workspace and starts the Mutagen sync. You can run it again: it reuses the workspace and its live sessions. `verify` and `run` do this themselves when the checkout has no workspace yet, so `start` is optional. |
+| `verify <profile>` | Flush, snapshot, queue, and stream the profile's command. The log is also written to `.testbox/logs/<job-id>.log`. |
 | `run "<command>" [--profile NAME]` | The same, for any command. |
 | `status <job-id>`, `logs <job-id> [--follow]`, `cancel <job-id>` | One job. |
 | `artifacts <job-id>` | Downloads the job's artifacts into `./.testbox/<job-id>/`. |
 | `stop` | Stops the sync and deletes the workspace. |
 | `prune [--dry-run]` | Terminates the stale syncs on this machine. Live syncs stay. It does not use the API. With `--dry-run`, it only prints them. |
 
-Flags for `verify` and `run`: `--detach` (submit and return the job id), `--timeout <seconds>` (default 1800), `--priority <n>`, `--workspace <id>`, `--direct` (see [Without a control plane](#without-a-control-plane)), `--ssh-host <host>`, `--json` (NDJSON events and a final summary line). `start` takes the same flags. Ctrl-C on a terminal asks whether to cancel or detach; without a terminal it cancels.
+Flags for `verify` and `run`: `--detach` (submit and return the job id), `--timeout <seconds>` (default 1800), `--priority <n>`, `--workspace <id>`, `--direct` (see [Without a control plane](#without-a-control-plane)), `--ssh-host <host>`, `--quiet` (do not print the log; the file is still written), `--json` (see [Output with --json](#output-with---json)). `start` takes the same flags. Ctrl-C on a terminal asks whether to cancel or detach; without a terminal it cancels.
 
 ### Admin
 
@@ -37,12 +38,31 @@ Flags for `verify` and `run`: `--detach` (submit and return the job id), `--time
 | Code | Meaning |
 | --- | --- |
 | 0 | job passed |
-| 1 | job failed, or any other error (for example a failed `doctor` check) |
+| 1 | job failed, or another error at run time (for example a failed `doctor` check) |
+| 2 | bad call: unknown profile, missing or invalid `testbox.yml`, unknown flag or missing argument, bad `--timeout` |
 | 10 | sync error (Mutagen) |
 | 11 | no compatible worker: no worker has the labels, none with the labels sends heartbeats, SSH to the worker fails, or the API answers 503 |
 | 12 | timeout, or the worker stopped during the job (its lease expired) |
 | 13 | cancelled |
 | 20 | auth (the API answers 401 or 403) |
+
+## Output with --json
+
+Every command accepts `--json`. It writes NDJSON to stdout, one event per line, and the last line is always a `summary`, also when the command fails before a job exists. Stdout has nothing else. Stderr can still carry notes from `setup`, `init`, and a bad command line.
+
+| Event | Fields | When |
+| --- | --- | --- |
+| `info`, `error` | `line` | A note, or an error that is not the end (for example a Mutagen resume that failed). |
+| `source` | `path`, `branch`, `commit`, `dirty` | Which checkout `verify` or `run` snapshotted. `branch`, `commit`, and `dirty` are missing when git fails. |
+| `status` | `state`, `jobId` | Each state change: `queued`, `assigned`, `running`. |
+| `log` | `stream` (`stdout` or `stderr`), `line` | One line of the job log. Not printed with `--quiet`. |
+| `check` | `ok`, `label`, `fix` | One `doctor` check. |
+| `profiles` | `file`, `project`, `profiles[]` (`name`, `command`, `requires`, `artifacts`) | The `profiles` command. |
+| `prune` | `name`, `root`, `reason`, `dryRun`, `ok`, `error` | One sync the `prune` command terminated (or would). |
+| `user` | `name`, `apiUrl`, `token` | `admin add-user`. |
+| `summary` | `exit`, `hint`, `exitCode`, `state`, `jobId`, `error`, `logFile`, and per command: `ok`, `source` (`status`), `failed` (`doctor`, `prune`), `count` and `dryRun` (`prune`), `file` and `profiles` (`init`) | The last line. |
+
+In the summary, `exit` is the status of the CLI, the same as `$?`, and `exitCode` is the status of the command on the worker (`null` when it did not run). `hint` is present when `exit` is not 0 and says what to do, in one line. `logFile` is the local copy of the job log next to `testbox.yml`: `.testbox/logs/<job-id>.log`, or `.testbox/logs/run_<id>.log` with `--direct` (no job exists there). `logs --follow` writes it too when it runs inside a repo with `testbox.yml`. A `state` of `error` means the command stopped before a job existed; `error` has the message. A log file that cannot be written does not fail the job: an `info` event says why, and the summary has no `logFile`.
 
 ## testbox.yml
 
@@ -101,7 +121,7 @@ Job states: `queued → assigned → running → succeeded | failed | cancelled 
 
 Each checkout of a repo gets its own workspace and its own folder on the worker: `~/testbox/workspaces/<user>/<project>/<workspace id>`. So a main checkout and a git worktree of one repo do not sync into the same folder. With `--direct`, the folder is `~/testbox/workspaces/local/<project>/<id>`, and the id is a short hash of the checkout directory.
 
-`start` writes the workspace to `.testbox/workspace.json`. You can run `start` again safely. When the API still has the workspace, `start` reuses it and keeps the Mutagen sessions that are alive. It makes a session only when one is missing. When the API does not have the workspace, `start` stops the old sessions and makes a new workspace. With `--direct`, `start` stops the old session and makes it again.
+`start` writes the workspace to `.testbox/workspace.json`. `verify` and `run` call the same code when that file is missing (or belongs to another checkout), so the first `verify` in a checkout also starts it. You can run `start` again safely. When the API still has the workspace, `start` reuses it and keeps the Mutagen sessions that are alive. It makes a session only when one is missing. When the API does not have the workspace, `start` stops the old sessions and makes a new workspace. With `--direct`, `start` stops the old session and makes it again.
 
 Workspaces from before this layout use `~/testbox/workspaces/<user>/<project>`. When `start` finds such a workspace, it stops its sessions, deletes it, and makes a new one in the new layout. `start` also warns when another checkout on your machine still syncs into the same worker folder. The old folders stay on the worker until you remove them.
 

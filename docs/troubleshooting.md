@@ -19,6 +19,7 @@ The worker log is `~/testbox/logs/worker.stderr.log` on a Mac, and `journalctl -
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
+| `verify` exits 2. | The call is wrong: unknown profile, no or invalid `testbox.yml`, a bad flag. The message names the profiles or the YAML problem. | Fix the command line or `testbox.yml`. The code did not run. |
 | `verify` exits 11: `no registered worker can satisfy required labels`. | No registered worker has all the labels in `requires`. | `testbox doctor` names the profile. Change `requires`, or add a worker with the label (`add-worker --labels …`). |
 | `verify` exits 11: `no compatible worker is heartbeating`. | The workers with those labels are down. | `testbox doctor`. A down worker: `testbox admin add-worker` for it. |
 | The job stays `queued`. | Its worker is busy, or it stopped after the submit. | `testbox status <job-id>`, then `testbox doctor`. |

@@ -89,7 +89,7 @@ fix: send this to an admin: testbox admin authorize 'ssh-ed25519 AAAA… ana@lap
 
 The admin runs that line. It adds the key to every worker. Then the developer runs `testbox doctor` again; all checks must pass. Run `add-user` again for a person to give them a new token.
 
-In each repo: `testbox init` writes a `testbox.yml` for what it finds (Node, Gradle, SwiftPM, Xcode, Go, Cargo, Python). Check it, then `testbox start` and `testbox verify <profile>`.
+In each repo: `testbox init` writes a `testbox.yml` for what it finds (Node, Gradle, SwiftPM, Xcode, Go, Cargo, Python). Check it, then `testbox verify <profile>` (the first run starts the sync).
 
 ## Access from outside the LAN
 

@@ -9,20 +9,22 @@ Testbox copies the local tree (uncommitted changes too) to a worker, runs a comm
 
 ## Before you run anything
 
-1. Find `testbox.yml`. If there is none and the user wants one, run `testbox init`, then edit it (see below).
-2. Read the profiles in it. Pick the profile whose `command` matches the task. Do not guess a profile name.
-3. If a command fails with `no workspace; run testbox start`, run `testbox start` once, then retry.
+1. `testbox profiles --json` lists the profiles and the `testbox.yml` they come from. Pick the profile whose `command` matches the task. Do not guess a profile name: an unknown one exits 2 and names the real ones.
+2. No `testbox.yml` (exit 2, `testbox.yml not found`)? If the user wants one, run `testbox init` in the repo root, then edit it (see below).
+3. You do not need `testbox start`. `verify` starts the workspace itself the first time.
 
 ## Run
 
 ```sh
-testbox verify <profile> --json        # a profile from testbox.yml
-testbox run "<command>" --json         # any command, same flow
+testbox verify <profile> --json --quiet   # a profile from testbox.yml
+testbox run "<command>" --json --quiet    # any command, same flow
 ```
 
-- Always pass `--json`. It prints NDJSON events and a final summary line, in one ordered stream. Without it, stdout and stderr can arrive out of order through a pipe.
-- The first log line shows which checkout the job tested: `source: <path> <branch>@<commit>`, plus `(dirty)` when the tree had changes. Make sure it is the checkout you changed.
-- The default timeout is 1800 s. Set the Bash tool timeout to match, or use `--timeout <seconds>`. For long jobs, use `--detach` (prints the job id), then `testbox logs <job-id> --follow` or `testbox status <job-id>`.
+- Always pass `--json`. It prints NDJSON events and ends with one `summary` line, in one ordered stream. Without it, stdout and stderr can arrive out of order through a pipe.
+- Prefer `--quiet` for test suites. The log is not printed; it is written to `.testbox/logs/<job-id>.log` (the `logFile` field of the summary). Read the end of that file when the job fails: `tail -n 100 <logFile>`, or grep it for `FAIL`, `error`, or the test name. Without `--quiet`, every log line is also an event, and the file is still written.
+- The summary line has `state`, `exitCode` (the command's own status), `exit` (the CLI's exit code, see the table), `logFile`, and for a non-zero `exit` a `hint` that says what to do. Read `exit` from the summary or `$?`; both are the same.
+- The `source` event shows which checkout the job tested: `path`, `branch`, `commit`, `dirty`. Make sure it is the checkout you changed.
+- The default timeout is 1800 s. Set the Bash tool timeout to match, or use `--timeout <seconds>`. For long jobs, use `--detach` (the summary has the job id), then `testbox logs <job-id> --follow` or `testbox status <job-id>`.
 - Never run two `verify` calls for the same profile at once: a newer queued job cancels the older queued one (exit 13).
 - Artifacts: `testbox artifacts <job-id>` downloads them into `./.testbox/<job-id>/`.
 - `testbox cancel <job-id>` stops a job.
@@ -33,13 +35,14 @@ testbox run "<command>" --json         # any command, same flow
 | --- | --- | --- |
 | 0 | job passed | done |
 | 1 | job failed | a real build or test failure: read the log and fix the code |
+| 2 | bad call: unknown profile, missing or invalid `testbox.yml`, bad flag | fix the command line or `testbox.yml`, not the code |
 | 10 | sync error (Mutagen) | infrastructure: run `testbox doctor` |
 | 11 | no usable worker: none has all labels in `requires`, none with them is up, or SSH to it fails | run `testbox doctor`; if the labels are wrong, fix `requires` |
 | 12 | timeout, or the worker stopped during the job (`lease_expired`) | raise `--timeout` or find the hang; for `lease_expired`, run `testbox doctor` |
 | 13 | cancelled | someone cancelled it, or a newer submit replaced it |
 | 20 | auth | the token is wrong; the user must ask an admin for a new `testbox setup` line |
 
-Only exit 1 means the code is broken. For 10, 11, 12, 20, do not change the code to "fix" it. Run `testbox doctor`, report the problem and the fix it prints, and stop if the fix needs the user (SSH key, GUI login, Local Network permission, token).
+Only exit 1 means the code is broken. For 10, 11, 12, 20, do not change the code to "fix" it. Run `testbox doctor --json` (each check is a line, with a `fix`), report the problem and the fix it prints, and stop if the fix needs the user (SSH key, GUI login, Local Network permission, token).
 
 ## testbox.yml
 
@@ -67,6 +70,7 @@ Rules for good profiles:
 - With `package.json` and `pnpm-lock.yaml`, the worker installs `node_modules` itself (cached by lockfile). Do not put `pnpm install` in the command.
 - Testbox does not reset simulators, and other users can share the Mac. For a clean simulator, make one in the command (`xcrun simctl create`), use its UDID as the destination, and delete it in a `trap ... EXIT`.
 - Swift on a Mac worker: use `swift test --build-system native`; the default build system hangs there.
+- `testbox init` adds `.testbox/` to `.gitignore`. Keep it there: it holds the workspace state and the job logs.
 
 ## More
 

@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import { Command, CommanderError } from 'commander';
 import type { EventEmitter } from 'events';
+import { ExitCode } from '@testbox/shared';
 import { AdminApp, DEFAULT_GIT_REF, type AddWorkerFlags, type InitControlPlaneFlags, type UpgradeFlags } from './admin';
-import { TestboxApp, type CliIO } from './commands';
+import { exitCodeForFailure, TestboxApp, type CliIO } from './commands';
 import { DeveloperApp } from './developer';
+import { Output } from './output';
 import { defaultSpawn } from './remote';
 
 function defaultPrompt(question: string): Promise<string> {
@@ -53,6 +55,10 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
   let code = 0;
   const program = new Command();
   program.exitOverride();
+  program.configureOutput({
+    writeOut: (text) => full.stdout.write(text),
+    writeErr: (text) => full.stderr.write(text),
+  });
   program.name('testbox').description('Run builds and tests on self-hosted macOS and Linux workers');
 
   const common = (command: Command) =>
@@ -62,6 +68,7 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
       .option('--workspace <id>', 'workspace id')
       .option('--direct', 'flush and run over SSH without the queue')
       .option('--detach', 'submit and return without waiting')
+      .option('--quiet', 'do not print the job log; it is still written to .testbox/logs/<job-id>.log')
       .option('--ssh-host <host>', 'ssh config host');
 
   program
@@ -115,12 +122,19 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
     code = await app.stop();
   });
 
+  program
+    .command('profiles')
+    .description('list the profiles in testbox.yml (--json for a machine-readable list)')
+    .action(async () => {
+      code = await app.profiles();
+    });
+
   common(
     program
       .command('run')
       .description('run a command on a worker')
       .argument('<command>', 'command to run')
-      .option('--profile <name>', 'profile name'),
+      .option('--profile <name>', 'profile name (latest wins among queued jobs of one profile)'),
   )
     .action(async (command: string, opts) => {
       code = await app.run(command, opts);
@@ -231,10 +245,14 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
   } catch (err) {
     if (err instanceof CommanderError) {
       if (err.exitCode === 0) return 0;
-      full.stderr.write(`${err.message}\n`);
-      return 1;
+      // Commander already wrote the message to stderr. With --json, also end stdout with the summary line.
+      if (json) new Output(true, full.stdout, full.stderr).failure(err.message.trim(), ExitCode.Usage);
+      return ExitCode.Usage;
     }
-    throw err;
+    // An error no command caught: still one summary line, with the exit code of its class.
+    const exit = exitCodeForFailure(err);
+    new Output(json, full.stdout, full.stderr).failure(err instanceof Error ? err.message : String(err), exit);
+    return exit;
   }
   return code;
 }

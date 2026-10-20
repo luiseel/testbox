@@ -2,8 +2,9 @@ import { access, readdir, readFile, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { buildSshArgs, ExitCode, loadRepoConfig } from '@testbox/shared';
+import { Output } from './output';
 import { CliApiError, HttpApi } from './api-client';
-import { TestboxApp, type CliIO } from './commands';
+import { exitCodeForFailure, TestboxApp, type CliIO } from './commands';
 import { readUserConfig, type UserConfig } from './config-store';
 import { MutagenSsh } from './remote';
 import { classifySessions, loadRootState, staleReason } from './sessions';
@@ -37,6 +38,10 @@ export class DeveloperApp {
     private readonly json: boolean,
   ) {}
 
+  private out(): Output {
+    return new Output(this.json, this.io.stdout, this.io.stderr);
+  }
+
   /** Install Mutagen, log in, make an SSH key, then check everything. */
   async setup(apiUrl: string, token: string): Promise<number> {
     const say = (text: string) => this.io.stderr.write(`${text}\n`);
@@ -46,7 +51,10 @@ export class DeveloperApp {
         onStderr: (text) => this.io.stderr.write(text),
       });
       if (brew.code !== 0) {
-        say('could not install Mutagen with Homebrew. Install it from https://mutagen.io/documentation/introduction/installation, then run testbox setup again.');
+        this.out().failure(
+          'could not install Mutagen with Homebrew. Install it from https://mutagen.io/documentation/introduction/installation, then run testbox setup again.',
+          ExitCode.JobFailed,
+        );
         return ExitCode.JobFailed;
       }
     }
@@ -59,7 +67,18 @@ export class DeveloperApp {
 
   /** Check each part a job needs, and print the fix for each problem. */
   async doctor(): Promise<number> {
+    const output = this.out();
     const checks: Check[] = [];
+    try {
+      return await this.runChecks(checks, output);
+    } catch (err) {
+      const code = exitCodeForFailure(err);
+      output.failure(err instanceof Error ? err.message : 'doctor failed', code);
+      return code;
+    }
+  }
+
+  private async runChecks(checks: Check[], output: Output): Promise<number> {
     const add = (check: Check) => {
       checks.push(check);
       if (this.json) {
@@ -71,9 +90,14 @@ export class DeveloperApp {
     };
 
     const user = await readUserConfig(this.io.homeDir);
+    // A check that stops doctor early: its own exit code, so a caller knows the class of the problem.
+    const stop = (exit: number): number => {
+      output.summary({ ok: false, exitCode: null, exit, failed: 1 });
+      return exit;
+    };
     if (!user?.token || !user.apiUrl) {
       add({ ok: false, label: 'logged in', fix: 'ask an admin for a setup command (testbox admin add-user <name>), then run it' });
-      return ExitCode.Auth;
+      return stop(ExitCode.Auth);
     }
     const api = new HttpApi(user.apiUrl, user.token, this.io.fetchImpl);
     if (!(await api.healthy())) {
@@ -82,7 +106,7 @@ export class DeveloperApp {
         label: `API at ${user.apiUrl}`,
         fix: `not on the office LAN? Turn on Twingate; it needs a resource for ${new URL(user.apiUrl).host}`,
       });
-      return ExitCode.NoWorker;
+      return stop(ExitCode.NoWorker);
     }
     add({ ok: true, label: `API at ${user.apiUrl}` });
     try {
@@ -91,7 +115,7 @@ export class DeveloperApp {
     } catch (err) {
       if (err instanceof CliApiError && err.status === 401) {
         add({ ok: false, label: 'token', fix: 'ask an admin for a new token: testbox admin add-user <your name>' });
-        return ExitCode.Auth;
+        return stop(ExitCode.Auth);
       }
       throw err;
     }
@@ -110,7 +134,16 @@ export class DeveloperApp {
       for (const check of await this.checkWorker(worker, user, key)) add(check);
     }
     for (const check of await this.checkProfiles(workers)) add(check);
-    return checks.every((check) => check.ok) ? ExitCode.Pass : ExitCode.JobFailed;
+    const failed = checks.filter((check) => !check.ok).length;
+    const exit = failed === 0 ? ExitCode.Pass : ExitCode.JobFailed;
+    output.summary({
+      ok: failed === 0,
+      exitCode: null,
+      exit,
+      failed,
+      hint: failed === 0 ? undefined : 'apply the fix of each failed check; stop when a fix needs the user',
+    });
+    return exit;
   }
 
   /**
@@ -122,7 +155,7 @@ export class DeveloperApp {
     try {
       report = await classifySessions(await this.mutagen().list(), loadRootState);
     } catch (err) {
-      this.io.stderr.write(`cannot list Mutagen syncs: ${err instanceof Error ? err.message.trim() : String(err)}\n`);
+      this.out().failure(`cannot list Mutagen syncs: ${err instanceof Error ? err.message.trim() : String(err)}`, ExitCode.SyncError);
       return ExitCode.SyncError;
     }
     const stale = report.sessions.filter((entry) => entry.kind !== 'live');
@@ -150,29 +183,29 @@ export class DeveloperApp {
         this.io.stdout.write(`${dryRun ? 'would terminate' : 'terminated'} ${session.name} (${reason}: ${session.alphaPath})\n`);
       }
     }
-    if (this.json) {
-      this.io.stdout.write(`${JSON.stringify({ type: 'pruned', count, dryRun })}\n`);
-    } else {
-      this.io.stdout.write(`${dryRun ? `${count} stale syncs to terminate` : `${count} stale syncs terminated`}\n`);
-    }
-    return failed > 0 ? ExitCode.SyncError : ExitCode.Pass;
+    const exit = failed > 0 ? ExitCode.SyncError : ExitCode.Pass;
+    if (!this.json) this.io.stdout.write(`${dryRun ? `${count} stale syncs to terminate` : `${count} stale syncs terminated`}\n`);
+    this.out().summary({ ok: failed === 0, exitCode: null, exit, count, failed, dryRun });
+    return exit;
   }
 
   /** Write a starting testbox.yml from what the repo contains. */
   async init(force: boolean): Promise<number> {
     const file = path.join(this.io.cwd, 'testbox.yml');
     if (!force && (await exists(file))) {
-      this.io.stderr.write('testbox.yml exists; pass --force to replace it\n');
+      this.out().failure('testbox.yml exists; pass --force to replace it', ExitCode.JobFailed);
       return ExitCode.JobFailed;
     }
     const detected = await detectProfiles(this.io.cwd);
     await writeFile(file, renderConfig(path.basename(this.io.cwd), detected));
+    if (await ignoreStateDir(this.io.cwd)) this.io.stderr.write('added .testbox/ to .gitignore\n');
     if (detected.profiles.length === 0) {
       this.io.stderr.write('wrote testbox.yml with an example profile; edit its command\n');
     } else {
       this.io.stderr.write(`wrote testbox.yml with ${detected.profiles.map((profile) => profile.name).join(', ')}\n`);
     }
-    this.io.stderr.write('next: testbox start, then testbox verify <profile>\n');
+    this.io.stderr.write('next: testbox verify <profile>\n');
+    this.out().summary({ ok: true, exitCode: 0, exit: 0, file, profiles: detected.profiles.map((profile) => profile.name) });
     return ExitCode.Pass;
   }
 
@@ -299,6 +332,22 @@ export class DeveloperApp {
     if (result.code !== 0) throw new Error(`ssh-keygen failed: ${result.stderr.trim()}`);
     return { file: `${file}.pub`, created: true };
   }
+}
+
+/** Add `.testbox/` to the repo's .gitignore when it is not there. Returns true when it wrote. */
+export async function ignoreStateDir(root: string): Promise<boolean> {
+  const file = path.join(root, '.gitignore');
+  let text = '';
+  try {
+    text = await readFile(file, 'utf8');
+  } catch {
+    text = '';
+  }
+  const present = text.split(/\r?\n/).some((line) => /^\/?\.testbox\/?$/.test(line.trim()));
+  if (present) return false;
+  const prefix = text.length === 0 || text.endsWith('\n') ? '' : '\n';
+  await writeFile(file, `${text}${prefix}.testbox/\n`);
+  return true;
 }
 
 interface DetectedProfile {

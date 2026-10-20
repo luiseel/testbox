@@ -135,7 +135,7 @@ export class AdminApp {
         output.info('Redis now has a password. Run `testbox admin add-worker <ssh-host>` again for each existing worker.');
       }
       output.info('next: testbox admin add-worker <user@worker-ip>');
-      output.summary({ ok: true, exitCode: 0 });
+      output.summary({ ok: true, exitCode: 0, exit: 0 });
       return ExitCode.Pass;
     } catch (err) {
       return this.fail(output, err);
@@ -149,6 +149,7 @@ export class AdminApp {
       const apiUrl = await this.apiUrl();
       if (this.json) {
         this.io.stdout.write(`${JSON.stringify({ type: 'user', name, apiUrl, token })}\n`);
+        output.summary({ ok: true, exitCode: 0, exit: 0 });
       } else {
         output.info(`token for ${name}. Send this command to them over a private channel:`);
         this.io.stdout.write(`testbox setup --api-url ${apiUrl} --token ${token}\n`);
@@ -200,7 +201,7 @@ export class AdminApp {
         const smoke = await this.smokeTest(worker.id, output);
         if (smoke !== ExitCode.Pass) return smoke;
       }
-      output.summary({ ok: true, exitCode: 0 });
+      output.summary({ ok: true, exitCode: 0, exit: 0 });
       return ExitCode.Pass;
     } catch (err) {
       return this.fail(output, err);
@@ -268,7 +269,7 @@ export class AdminApp {
         return ExitCode.JobFailed;
       }
       output.info(`updated ${workers.length} worker${workers.length === 1 ? "" : "s"}`);
-      output.summary({ ok: true, exitCode: 0 });
+      output.summary({ ok: true, exitCode: 0, exit: 0 });
       return ExitCode.Pass;
     } catch (err) {
       return this.fail(output, err);
@@ -302,7 +303,7 @@ export class AdminApp {
         }
       }
       if (failed > 0) return ExitCode.JobFailed;
-      output.summary({ ok: true, exitCode: 0 });
+      output.summary({ ok: true, exitCode: 0, exit: 0 });
       return ExitCode.Pass;
     } catch (err) {
       return this.fail(output, err);
@@ -441,8 +442,8 @@ export class AdminApp {
   }
 
   private fail(output: Output, err: unknown): number {
-    output.error(err instanceof Error ? err.message : 'failed');
-    if (err instanceof CliApiError) return exitCodeForCliError(err) ?? ExitCode.JobFailed;
-    return ExitCode.JobFailed;
+    const code = err instanceof CliApiError ? (exitCodeForCliError(err) ?? ExitCode.JobFailed) : ExitCode.JobFailed;
+    output.failure(err instanceof Error ? err.message : 'failed', code);
+    return code;
   }
 }
