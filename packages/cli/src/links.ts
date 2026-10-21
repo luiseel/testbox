@@ -96,6 +96,14 @@ export async function samePlace(a: string, b: string): Promise<boolean> {
   }
 }
 
+/** The link in `others` whose checkout is the one of `link` (also through a symlink), or null. */
+export async function sameCheckoutAs(link: LinkedCheckout, others: readonly LinkedCheckout[]): Promise<LinkedCheckout | null> {
+  for (const other of others) {
+    if (await samePlace(link.dir, other.dir)) return other;
+  }
+  return null;
+}
+
 /** Find every link in order. The first link that cannot be used throws; so do two links to one checkout. */
 export async function resolveLinks(
   configDir: string,
@@ -106,11 +114,8 @@ export async function resolveLinks(
   const links: LinkedCheckout[] = [];
   for (const name of names) {
     const link = await resolveLink(configDir, project, name, overrides);
-    for (const other of links) {
-      if (await samePlace(link.dir, other.dir)) {
-        throw new LinkError(`link ${name}: ${link.dir} is the same checkout as link ${other.name}`);
-      }
-    }
+    const other = await sameCheckoutAs(link, links);
+    if (other) throw new LinkError(`link ${name}: ${link.dir} is the same checkout as link ${other.name}`);
     links.push(link);
   }
   return links;

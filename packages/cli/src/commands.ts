@@ -492,15 +492,18 @@ export class TestboxApp {
         submitted = await withSnapshotLocks([configDir, ...links.map((link) => link.dir)], () =>
           this.submit(loaded, links, user, api, command, profileName, profile, flags, output, timeoutMs),
         );
-      } finally {
+      } catch (err) {
         stop.dispose();
+        throw err;
       }
       output.event({ type: 'status', state: submitted.job.state, jobId: submitted.job.id });
-      if (flags.detach || stop.requested()) {
+      if (flags.detach) {
+        stop.dispose();
         output.summary(detachedSummary(submitted.job.id));
         return ExitCode.Pass;
       }
-      return await this.follow(api, submitted.job.id, output, this.logFile(configDir, submitted.job.id));
+      // follow takes the watch over without a gap: its own handlers are in place before the watch ends.
+      return await this.follow(api, submitted.job.id, output, this.logFile(configDir, submitted.job.id), stop);
     } catch (err) {
       return this.fail(output, err);
     }
@@ -701,11 +704,17 @@ export class TestboxApp {
     return code;
   }
 
-  private async follow(api: HttpApi, jobId: string, output: Output, log: LogFile | null): Promise<number> {
+  private async follow(
+    api: HttpApi,
+    jobId: string,
+    output: Output,
+    log: LogFile | null,
+    submitWatch?: { requested: () => boolean; dispose: () => void },
+  ): Promise<number> {
     let terminal: { state: string; exitCode: number | null; error: string | null } | null = null;
     let detached = false;
     const controller = new AbortController();
-    await log?.open();
+    // The handlers come first, before any await: a signal must never find no handler.
     const dispose = attachInterrupt({
       signals: this.io.signals,
       isTTY: this.io.isTTY,
@@ -718,6 +727,14 @@ export class TestboxApp {
         controller.abort();
       },
     });
+    submitWatch?.dispose();
+    if (submitWatch?.requested()) {
+      // The signal came during the submit: the job is queued; do not follow it.
+      dispose();
+      output.summary(detachedSummary(jobId));
+      return ExitCode.Pass;
+    }
+    await log?.open();
     try {
       await api.stream(
         jobId,

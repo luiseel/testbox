@@ -352,6 +352,33 @@ describe('agent-facing cli: detach and run --profile', () => {
     }
   });
 
+  it('has no gap between the submit watch and the follow handlers: a signal right after the status event detaches', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
+    const project = await mkdtemp(path.join(os.tmpdir(), 'tb-proj-'));
+    const stdout: string[] = [];
+    const seen: string[] = [];
+    try {
+      await loggedIn(home);
+      await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
+      const cli = io(home, project, quietRemote, stdout, [], openStreamApi(seen, () => undefined));
+      // The status event is written between the submit and follow; the signal lands while the log file opens.
+      cli.stdout = {
+        write: (chunk: string) => {
+          stdout.push(chunk);
+          if (chunk.includes('"type":"status"')) setImmediate(() => cli.signals.emit('SIGTERM'));
+        },
+      };
+      expect(await runCli(['verify', 'unit', '--json', '--quiet'], cli)).toBe(0);
+      expect(jsonLines(stdout).at(-1)).toMatchObject({ type: 'summary', jobId: 'job_9', state: 'detached', exit: 0 });
+      expect(seen.some((request) => request.endsWith('/cancel'))).toBe(false);
+      expect(cli.signals.listenerCount('SIGTERM')).toBe(0);
+      expect(cli.signals.listenerCount('SIGINT')).toBe(0);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+      await rm(project, { recursive: true, force: true });
+    }
+  });
+
   it('gives the --detach summary the same hint', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
     const project = await mkdtemp(path.join(os.tmpdir(), 'tb-proj-'));
