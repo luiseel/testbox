@@ -379,6 +379,37 @@ describe('agent-facing cli: detach and run --profile', () => {
     }
   });
 
+  it('still detaches on a SIGTERM while it fetches the final state after the stream ended without one', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
+    const project = await mkdtemp(path.join(os.tmpdir(), 'tb-proj-'));
+    const stdout: string[] = [];
+    const seen: string[] = [];
+    try {
+      await loggedIn(home);
+      await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
+      const cli = io(home, project, quietRemote, stdout, []);
+      const base = fakeApi(seen);
+      cli.fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        // The stream closes with no done event, so follow asks for the job; the signal lands during that request.
+        if (url.endsWith('/events')) return new Response('event: log\ndata: {"stream":"stdout","line":"building","offset":1}\n\n', { status: 200 });
+        if (url.endsWith('/jobs/job_9') && (init?.method ?? 'GET') === 'GET') {
+          cli.signals.emit('SIGTERM');
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          return new Response(JSON.stringify({ job: { id: 'job_9', state: 'running', exitCode: null, error: null } }), { status: 200 });
+        }
+        return base(input, init);
+      }) as typeof fetch;
+      expect(await runCli(['verify', 'unit', '--json', '--quiet'], cli)).toBe(0);
+      expect(jsonLines(stdout).at(-1)).toMatchObject({ type: 'summary', jobId: 'job_9', state: 'detached', exit: 0 });
+      expect(seen.some((request) => request.endsWith('/cancel'))).toBe(false);
+      expect(cli.signals.listenerCount('SIGTERM')).toBe(0);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+      await rm(project, { recursive: true, force: true });
+    }
+  });
+
   it('gives the --detach summary the same hint', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
     const project = await mkdtemp(path.join(os.tmpdir(), 'tb-proj-'));

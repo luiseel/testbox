@@ -769,29 +769,33 @@ export class TestboxApp {
       );
     } catch (err) {
       if (!detached && !(err instanceof Error && err.name === 'AbortError')) throw err;
-    } finally {
-      dispose();
+    }
+    // The handlers stay until the summary is written: a signal while the log closes or the
+    // final state is fetched still ends in the detached summary.
+    try {
       await log?.close();
       if (log?.error) output.info(log.error);
+      if (!terminal && !detached) {
+        const job = await api.getJob(jobId);
+        terminal = { state: job.job.state, exitCode: job.job.exitCode, error: job.job.error };
+      }
+      if (detached || !terminal) {
+        output.summary(detachedSummary(jobId, log?.path));
+        return ExitCode.Pass;
+      }
+      const exit = exitCodeForJob(terminal.state as JobState);
+      output.summary({
+        jobId,
+        state: terminal.state,
+        exitCode: terminal.exitCode,
+        error: terminal.error,
+        exit,
+        logFile: log?.path,
+      });
+      return exit;
+    } finally {
+      dispose();
     }
-    if (detached) {
-      output.summary(detachedSummary(jobId, log?.path));
-      return ExitCode.Pass;
-    }
-    if (!terminal) {
-      const job = await api.getJob(jobId);
-      terminal = { state: job.job.state, exitCode: job.job.exitCode, error: job.job.error };
-    }
-    const exit = exitCodeForJob(terminal.state as JobState);
-    output.summary({
-      jobId,
-      state: terminal.state,
-      exitCode: terminal.exitCode,
-      error: terminal.error,
-      exit,
-      logFile: log?.path,
-    });
-    return exit;
   }
 
   private logFile(configDir: string, id: string): LogFile {

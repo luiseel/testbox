@@ -4,6 +4,19 @@ import path from 'path';
 import { describe, expect, it } from 'vitest';
 import { canonicalDirs, withSnapshotLocks } from '../src/lock';
 
+/** A lock holder that says when it is inside, and waits until it is released. */
+function holder(dirs: string[]): { done: Promise<void>; inside: Promise<void>; release: () => void } {
+  let inside!: () => void;
+  let release!: () => void;
+  const insidePromise = new Promise<void>((resolve) => (inside = resolve));
+  const released = new Promise<void>((resolve) => (release = resolve));
+  const done = withSnapshotLocks(dirs, async () => {
+    inside();
+    await released;
+  });
+  return { done, inside: insidePromise, release };
+}
+
 /** Two runs on one machine that share a checkout must not flush, pause, and resume its sync under each other. */
 describe('snapshot locks', () => {
   it('serializes two runs that share a checkout', async () => {
@@ -12,25 +25,19 @@ describe('snapshot locks', () => {
     const other = path.join(root, 'interface_TGN-1');
     const api = path.join(root, 'api');
     for (const dir of [main, other, api]) await mkdir(dir);
-    const order: string[] = [];
     try {
-      let release!: () => void;
-      const first = withSnapshotLocks([main, api], async () => {
-        order.push('first start');
-        await new Promise<void>((resolve) => {
-          release = resolve;
-        });
-        order.push('first end');
-      });
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      const first = holder([main, api]);
+      await first.inside;
+      let secondStarted = false;
       const second = withSnapshotLocks([api, other], async () => {
-        order.push('second start');
+        secondStarted = true;
       });
+      // The second run shares api: it must still wait after a bounded time.
       await new Promise((resolve) => setTimeout(resolve, 500));
-      expect(order).toEqual(['first start']);
-      release();
-      await Promise.all([first, second]);
-      expect(order).toEqual(['first start', 'first end', 'second start']);
+      expect(secondStarted).toBe(false);
+      first.release();
+      await Promise.all([first.done, second]);
+      expect(secondStarted).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -48,12 +55,11 @@ describe('snapshot locks', () => {
       // The same checkout under two names: one lock, so no wait on itself.
       expect(await withSnapshotLocks([api, alias], async () => 'ran')).toBe('ran');
 
-      let release!: () => void;
-      const holder = withSnapshotLocks([api], () => new Promise<void>((resolve) => (release = resolve)));
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      const first = holder([api]);
+      await first.inside;
       await expect(withSnapshotLocks([alias], async () => 'never', { waitSeconds: 1 })).rejects.toThrow('another testbox run holds');
-      release();
-      await holder;
+      first.release();
+      await first.done;
 
       process.env.PATH = root;
       await expect(withSnapshotLocks([api], async () => 'never')).rejects.toThrow('flock is missing');
