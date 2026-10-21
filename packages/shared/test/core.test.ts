@@ -194,6 +194,8 @@ profiles:
     expect(bad('[../api]')).toThrow('a link name must match');
     expect(bad('[api, api]')).toThrow('a link name is listed twice');
     expect(bad('[interface]')).toThrow('a link cannot have the project name interface');
+    const many = `[${Array.from({ length: 21 }, (_, i) => `l${i}`).join(', ')}]`;
+    expect(bad(many)).toThrow('a profile can have at most 20 links');
   });
 
   it('parses worker capacity, ssh host, and extra labels', () => {

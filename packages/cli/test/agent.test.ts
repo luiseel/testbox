@@ -620,4 +620,79 @@ describe('agent-facing cli: links', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it('gives run --profile the links of the profile, and rejects a bad, repeated, self, or project-named --link with exit 2', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
+    const { root, main } = await linkedCheckouts({ api: 'project: api\n' });
+    const stdout: string[] = [];
+    const seen: { call: string; body: unknown }[] = [];
+    try {
+      await loggedIn(home);
+      expect(await runCli(['run', 'xcodebuild test -only-testing:One', '--profile', 'ios', '--json'], io(home, main, quietRemote, stdout, [], linkApi(seen)))).toBe(0);
+      const source = (jsonLines(stdout) as (Line & { links?: { name: string }[] })[]).find((line) => line.type === 'source');
+      expect(source?.links).toMatchObject([{ name: 'api' }]);
+      expect(seen.find((entry) => entry.call === 'POST /v1/jobs')?.body).toMatchObject({
+        command: 'xcodebuild test -only-testing:One',
+        profile: 'ios',
+        requires: ['macos'],
+        source: { links: [{ name: 'api', path: path.join(root, 'api') }] },
+      });
+
+      const bad = async (args: string[], error: string) => {
+        stdout.length = 0;
+        seen.length = 0;
+        expect(await runCli([...args, '--json'], io(home, main, quietRemote, stdout, [], linkApi(seen)))).toBe(2);
+        expect(jsonLines(stdout).at(-1)).toMatchObject({ type: 'summary', exit: 2, error });
+        expect(seen).toEqual([]);
+      };
+      await bad(['run', 'make', '--link', 'api'], 'invalid --link api: pass --link <name>=<path>');
+      await bad(['run', 'make', '--link', 'api=../api', '--link', 'api=../api'], '--link api is given twice');
+      await bad(['run', 'make', '--link', 'api=.'], `link api: ${main} is this checkout`);
+      await bad(['run', 'make', '--link', 'interface=../api'], '--link interface: a link cannot have the project name interface');
+      const many = Array.from({ length: 21 }, (_, i) => ['--link', `l${i}=../api`]).flat();
+      await bad(['run', 'make', ...many], '--link: at most 20 links');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('resumes every paused session when the snapshot fails, or when a later pause fails', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
+    const { root, main } = await linkedCheckouts({ api: 'project: api\n' });
+    const stdout: string[] = [];
+    const calls: { file: string; args: string[] }[] = [];
+    /** quietRemote that fails one step: the snapshot, or the pause of the api session. */
+    const failing = (step: 'snapshot' | 'pause-api'): RemoteRunner => ({
+      async run(file, args) {
+        calls.push({ file, args });
+        const last = args.at(-1) ?? '';
+        if (step === 'snapshot' && last.includes('snapshot-cli')) return { code: 1, stdout: '', stderr: 'rsync: disk full' };
+        if (step === 'pause-api' && file === 'mutagen' && args[1] === 'pause' && args[2].includes('-api-')) {
+          return { code: 1, stdout: '', stderr: 'session not found' };
+        }
+        return quietRemote.run(file, args);
+      },
+    });
+    const mutagen = (verb: string) => calls.filter((entry) => entry.file === 'mutagen' && entry.args[1] === verb).map((entry) => entry.args[2]);
+    try {
+      await loggedIn(home);
+      expect(await runCli(['verify', 'ios', '--json'], io(home, main, failing('snapshot'), stdout, [], linkApi([])))).toBe(10);
+      expect(jsonLines(stdout).at(-1)).toMatchObject({ type: 'summary', exit: 10, error: 'rsync: disk full' });
+      expect(mutagen('pause')).toHaveLength(2);
+      expect(new Set(mutagen('resume'))).toEqual(new Set(mutagen('pause')));
+
+      calls.length = 0;
+      stdout.length = 0;
+      expect(await runCli(['verify', 'ios', '--json'], io(home, main, failing('pause-api'), stdout, [], linkApi([])))).toBe(10);
+      expect(jsonLines(stdout).at(-1)).toMatchObject({ type: 'summary', exit: 10, error: 'session not found' });
+      // The main session was paused and is resumed; the api session never paused, so it is not resumed.
+      expect(mutagen('pause')).toHaveLength(2);
+      expect(mutagen('resume')).toEqual([mutagen('pause')[0]]);
+      expect(calls.some((entry) => (entry.args.at(-1) ?? '').includes('snapshot-cli'))).toBe(false);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

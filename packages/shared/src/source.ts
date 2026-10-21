@@ -1,24 +1,24 @@
 /** The longest string the API accepts in a JobSource field. */
 export const JOB_SOURCE_MAX_LENGTH = 500;
 
-/** A linked checkout of a job: its name in testbox.yml `links`, and where the CLI found it. */
-export interface JobSourceLink {
-  name: string;
+/** One checkout as the CLI saw it: its path, and its git state when git works. */
+export interface CheckoutSource {
   path: string;
   branch?: string;
   commit?: string;
   dirty?: boolean;
 }
 
-/** The most links a job source may name. */
+/** A linked checkout of a job: its name in testbox.yml `links`, and where the CLI found it. */
+export interface JobSourceLink extends CheckoutSource {
+  name: string;
+}
+
+/** The most links a profile, a `--link` list, or a job source may have. */
 export const JOB_SOURCE_MAX_LINKS = 20;
 
 /** The checkout a job came from, as the CLI saw it when it submitted the job. */
-export interface JobSource {
-  path: string;
-  branch?: string;
-  commit?: string;
-  dirty?: boolean;
+export interface JobSource extends CheckoutSource {
   /** The linked checkouts, when the profile has `links`. */
   links?: JobSourceLink[];
 }

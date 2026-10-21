@@ -22,6 +22,14 @@ function parse<T>(schema: z.ZodType<T>, value: unknown): T {
   return result.data;
 }
 
+/** One checkout in a job source (the main one, or a link): the same fields for both. */
+const checkoutSourceFields = {
+  path: z.string().min(1).max(JOB_SOURCE_MAX_LENGTH),
+  branch: z.string().max(JOB_SOURCE_MAX_LENGTH).optional(),
+  commit: z.string().max(JOB_SOURCE_MAX_LENGTH).optional(),
+  dirty: z.boolean().optional(),
+};
+
 function publicJob(job: JobRecord): Omit<JobRecord, 'queueKey'> {
   return {
     id: job.id,
@@ -170,20 +178,9 @@ export class JobsController {
         idempotencyKey: z.string().min(8).max(200).optional(),
         source: z
           .object({
-            path: z.string().min(1).max(JOB_SOURCE_MAX_LENGTH),
-            branch: z.string().max(JOB_SOURCE_MAX_LENGTH).optional(),
-            commit: z.string().max(JOB_SOURCE_MAX_LENGTH).optional(),
-            dirty: z.boolean().optional(),
+            ...checkoutSourceFields,
             links: z
-              .array(
-                z.object({
-                  name: z.string().regex(SAFE_SEGMENT),
-                  path: z.string().min(1).max(JOB_SOURCE_MAX_LENGTH),
-                  branch: z.string().max(JOB_SOURCE_MAX_LENGTH).optional(),
-                  commit: z.string().max(JOB_SOURCE_MAX_LENGTH).optional(),
-                  dirty: z.boolean().optional(),
-                }),
-              )
+              .array(z.object({ name: z.string().regex(SAFE_SEGMENT), ...checkoutSourceFields }))
               .max(JOB_SOURCE_MAX_LINKS)
               .optional(),
           })

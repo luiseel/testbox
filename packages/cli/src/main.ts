@@ -144,7 +144,7 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
       .argument('<command>', 'command to run')
       .option(
         '--profile <name>',
-        "use the requires and artifacts of this profile; the job replaces a queued job of the same profile in this workspace",
+        'use the requires, artifacts, and links of this profile; the job replaces a queued job of the same profile in this workspace',
       ),
   ))
     .action(async (command: string, opts) => {

@@ -3,6 +3,7 @@ import path from 'path';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import { SAFE_SEGMENT } from './paths';
+import { JOB_SOURCE_MAX_LINKS } from './source';
 
 export const DEFAULT_IGNORE = [
   'node_modules',
@@ -25,6 +26,7 @@ const profileObject = z.object({
   /** Other checkouts that are snapshotted next to this one; each lands in a sibling folder of this tree. */
   links: z
     .array(z.string().regex(SAFE_SEGMENT, { message: `a link name must match ${SAFE_SEGMENT.source}` }))
+    .max(JOB_SOURCE_MAX_LINKS, { message: `a profile can have at most ${JOB_SOURCE_MAX_LINKS} links` })
     .default([])
     .refine((links) => new Set(links).size === links.length, { message: 'a link name is listed twice' }),
 });

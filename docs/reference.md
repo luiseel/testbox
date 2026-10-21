@@ -15,13 +15,13 @@ Run `testbox <command> --help` for every option.
 | `profiles` | Lists the profiles of `testbox.yml` (name, labels, command, links) and where the file is. With `--json`, one `profiles` event and a summary. |
 | `start` | Creates the workspace and starts the Mutagen sync. You can run it again: it reuses the workspace and its live sessions. `verify` and `run` do this themselves when the checkout has no workspace yet, so `start` is optional. |
 | `verify <profile>` | Flush, snapshot, queue, and stream the profile's command. The log is also written to `.testbox/logs/<job-id>.log`. |
-| `run "<command>" [--profile NAME]` | The same, for any command. With `--profile`, the job also gets that profile's `requires` and `artifacts`, so it runs on the same kind of worker (for example one test of an iOS profile). An unknown profile exits 2. The command does not change: write the setup the profile needs into it. The job counts as a job of that profile, so it replaces a queued `verify NAME` of the same workspace (see [Scheduling](#scheduling)). |
+| `run "<command>" [--profile NAME]` | The same, for any command. With `--profile`, the job also gets that profile's `requires`, `artifacts`, and `links`, so it runs on the same kind of worker (for example one test of an iOS profile). An unknown profile exits 2. The command does not change: write the setup the profile needs into it. The job counts as a job of that profile, so it replaces a queued `verify NAME` of the same workspace (see [Scheduling](#scheduling)). |
 | `status <job-id>`, `logs <job-id> [--follow]`, `cancel <job-id>` | One job. |
 | `artifacts <job-id>` | Downloads the job's artifacts into `./.testbox/<job-id>/`. |
 | `stop` | Stops the sync and deletes the workspace. |
 | `prune [--dry-run]` | Terminates the stale syncs on this machine. Live syncs stay. It does not use the API. With `--dry-run`, it only prints them. |
 
-Flags for `verify` and `run`: `--detach` (submit and return the job id), `--timeout <seconds>` (default 1800), `--priority <n>`, `--workspace <id>`, `--direct` (see [Without a control plane](#without-a-control-plane)), `--ssh-host <host>`, `--quiet` (do not print the log; the file is still written), `--link <name>=<path>` (where the checkout of a link is; repeatable; a relative path is relative to the current directory; with `verify` the profile must have that link, with `run` it adds the link), `--json` (see [Output with --json](#output-with---json)). `start` takes the same flags, except `--link`. Ctrl-C on a terminal asks whether to cancel or detach; without a terminal it cancels. SIGTERM and SIGHUP detach: the job continues on the worker, and the CLI prints the `detached` summary and exits 0. This is for a tool that kills the CLI at a time limit. A second SIGTERM ends the CLI at once.
+Flags for `verify` and `run`: `--detach` (submit and return the job id), `--timeout <seconds>` (default 1800), `--priority <n>`, `--workspace <id>`, `--direct` (see [Without a control plane](#without-a-control-plane)), `--ssh-host <host>`, `--quiet` (do not print the log; the file is still written), `--link <name>=<path>` (where the checkout of a link is; repeatable; a relative path is relative to the current directory; with `verify` or `run --profile` the profile must have that link; with `run` without `--profile`, the `--link` flags are the links), `--json` (see [Output with --json](#output-with---json)). `start` takes the same flags, except `--link`. Ctrl-C on a terminal asks whether to cancel or detach; without a terminal it cancels. SIGTERM and SIGHUP detach: the job continues on the worker, and the CLI prints the `detached` summary and exits 0. This is for a tool that kills the CLI at a time limit. A second SIGTERM ends the CLI at once.
 
 ### Admin
 
@@ -86,7 +86,7 @@ profiles:
 
 The CLI finds `testbox.yml` in the current directory or a parent. It ignores unknown keys.
 
-`links` names other checkouts that the job sees as sibling folders, uncommitted changes included. Use it when the build reads a path outside the repo, for example a local Swift package at `../api/client/swift-client`. A link name has the same rules as `project`, and it cannot be the project name. For link `api`, the CLI looks for the checkout in this order:
+`links` names other checkouts that the job sees as sibling folders, uncommitted changes included. Use it when the build reads a path outside the repo, for example a local Swift package at `../api/client/swift-client`. A link name has the same rules as `project`, and it cannot be the project name. A profile has at most 20 links. For link `api`, the CLI looks for the checkout in this order:
 
 1. `--link api=<path>`.
 2. When this checkout's folder is `<project>_<suffix>` (for example `interface_TGN-821`), the sibling `../api_TGN-821`.

@@ -10,6 +10,7 @@ import {
   exitCodeForJob,
   fingerprintFromDirectory,
   formatJobSource,
+  JOB_SOURCE_MAX_LINKS,
   loadRepoConfig,
   needsDependencyRefresh,
   sessionName,
@@ -461,7 +462,7 @@ export class TestboxApp {
       const loaded = await loadRepoConfig(this.io.cwd);
       const configDir = path.dirname(loaded.file);
       const overrides = parseLinkFlags(flags.link, this.io.cwd);
-      const linkNames = jobLinkNames(profileName, profile, overrides);
+      const linkNames = jobLinkNames(loaded.config.project, profileName, profile, overrides);
       if (flags.direct && linkNames.length > 0) throw new UsageError('links need the control plane; run without --direct');
       // Find every linked checkout before any network call: a missing one is a mistake in the call.
       const links = await resolveLinks(configDir, loaded.config.project, linkNames, overrides);
@@ -854,8 +855,13 @@ export function exitCodeForFailure(err: unknown): number {
  * The links of a job. verify: the links of the profile; `--link` only changes where one is.
  * run: the names given with `--link`.
  */
-function jobLinkNames(profileName: string | null, profile: ProfileConfig | null, overrides: Map<string, string>): string[] {
-  if (!profile) return [...overrides.keys()];
+function jobLinkNames(project: string, profileName: string | null, profile: ProfileConfig | null, overrides: Map<string, string>): string[] {
+  if (!profile) {
+    // The same rules as `links` in testbox.yml: the main tree is the folder <project>, and the API caps the count.
+    if (overrides.has(project)) throw new UsageError(`--link ${project}: a link cannot have the project name ${project}`);
+    if (overrides.size > JOB_SOURCE_MAX_LINKS) throw new UsageError(`--link: at most ${JOB_SOURCE_MAX_LINKS} links`);
+    return [...overrides.keys()];
+  }
   for (const name of overrides.keys()) {
     if (!profile.links.includes(name)) {
       const known = profile.links.length ? `its links are: ${profile.links.join(', ')}` : 'it has no links';
