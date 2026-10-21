@@ -239,6 +239,7 @@ export class Daemon {
       });
       if (!running.ok) return;
 
+      const log = this.logWriter(job.id);
       const result = await runCommand({
         cwd: jobCwd(this.opts.dataDir, job),
         env: this.jobEnv(job.id, mise),
@@ -251,11 +252,10 @@ export class Daemon {
         onSpawn: (pgid) => {
           void this.store.setPgid(job.id, pgid);
         },
-        onLog: (event) => {
-          void this.noteLog(job.id, event.stream, event.text);
-        },
+        onLog: (event) => log.write(event.stream, event.text),
       });
 
+      await log.flush();
       await this.collect(job);
       const latest = await this.store.getJob(jobId);
       if (!latest || isTerminal(latest.state)) return;
@@ -326,6 +326,7 @@ export class Daemon {
   }
 
   private async miseInstall(job: JobRecord, cwd: string): Promise<void> {
+    const log = this.logWriter(job.id);
     await this.noteLog(job.id, 'stderr', 'mise install');
     const result = await runCommand({
       cwd,
@@ -334,10 +335,9 @@ export class Daemon {
       graceMs: this.opts.graceMs ?? 2_000,
       secrets: secretsFromEnv(this.env),
       shell: { argv: ['mise', 'install'] },
-      onLog: (event) => {
-        void this.noteLog(job.id, event.stream, event.text);
-      },
+      onLog: (event) => log.write(event.stream, event.text),
     });
+    await log.flush();
     if (result.exitCode !== 0) {
       const message = `mise install failed with exit ${result.exitCode ?? 'null'}`;
       await this.noteLog(job.id, 'stderr', message);
@@ -355,6 +355,24 @@ export class Daemon {
       jobId: job.id,
       files,
     });
+  }
+
+  /** Writes log lines without waiting; `flush` waits for all of them, so a job ends with its full log. */
+  private logWriter(jobId: string): { write: (stream: 'stdout' | 'stderr', text: string) => void; flush: () => Promise<void> } {
+    const pending = new Set<Promise<void>>();
+    return {
+      write: (stream, text) => {
+        const write: Promise<void> = this.noteLog(jobId, stream, text)
+          .catch(() => undefined)
+          .then(() => {
+            pending.delete(write);
+          });
+        pending.add(write);
+      },
+      flush: async () => {
+        await Promise.all(pending);
+      },
+    };
   }
 
   private async noteLog(jobId: string, stream: 'stdout' | 'stderr', text: string): Promise<void> {

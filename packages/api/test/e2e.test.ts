@@ -2,8 +2,8 @@ import type { INestApplication } from '@nestjs/common';
 import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { createId, createSnapshot, writeRetention, type JobRecord } from '@testbox/shared';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createId, createSnapshot, JobStore, writeRetention, type JobRecord } from '@testbox/shared';
 import { Daemon, startDaemon } from '@testbox/worker';
 import { CleanupService } from '../src/cleanup.service';
 import { createApp } from '../src/create-app';
@@ -166,6 +166,46 @@ describe('queue and execution', () => {
     );
     expect(await download.text()).toBe('v1\n');
     expect(events).toBeDefined();
+  });
+
+  it('has every log line, in the store and in the stream, when the job ends', async () => {
+    // A Redis on the network is slow; the job's last lines must still be in before it ends.
+    const appendLog = JobStore.prototype.appendLog;
+    const slow = vi.spyOn(JobStore.prototype, 'appendLog').mockImplementation(async function (this: JobStore, ...args) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return appendLog.apply(this, args);
+    });
+    open.push({ close: async () => slow.mockRestore() });
+    const ctx = await boot();
+    open.push(ctx);
+    const alice = await user(ctx, 'alice');
+    const ws = await call(ctx, alice.token, 'POST', '/v1/workspaces', { project: 'fast' });
+    const staging = path.join(ctx.dataDir, ws.json.stagingRel);
+    await mkdir(staging, { recursive: true });
+    const snapshotId = createId('snap');
+    const snap = await createSnapshot({
+      dataDir: ctx.dataDir,
+      stagingRel: ws.json.stagingRel,
+      snapshotId,
+      ignore: [],
+      retentionMs: 60_000,
+    });
+    await call(ctx, alice.token, 'POST', `/v1/workspaces/${ws.json.id}/snapshots`, { id: snapshotId, digest: snap.digest });
+    const created = await call(ctx, alice.token, 'POST', '/v1/jobs', {
+      workspaceId: ws.json.id,
+      snapshotId,
+      command: 'seq 1 300',
+      profile: 'fast',
+    });
+    const stream = collectSse(ctx, alice.token, created.json.job.id);
+    await ctx.daemon?.startProcessing();
+    const job = await waitJob(ctx, alice.token, created.json.job.id);
+    expect(job.state).toBe('succeeded');
+    const stored = await call(ctx, alice.token, 'GET', `/v1/jobs/${job.id}/logs`);
+    expect(stored.json.lines.map((l: { line: string }) => l.line).filter((l: string) => /^\d+$/.test(l))).toHaveLength(300);
+    const sse = await stream;
+    expect(sse.done).not.toBe('');
+    expect(sse.logs.filter((l) => /^\d+$/.test(l))).toEqual(Array.from({ length: 300 }, (_, i) => String(i + 1)));
   });
 
   it('runs a job with links in its work dir, next to the linked tree, and keeps the work dir and links', async () => {
