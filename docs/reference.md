@@ -39,7 +39,7 @@ Flags for `verify` and `run`: `--detach` (submit and return the job id), `--time
 | --- | --- |
 | 0 | job passed |
 | 1 | job failed, or another error at run time (for example a failed `doctor` check) |
-| 2 | bad call: unknown profile, missing or invalid `testbox.yml`, unknown flag or missing argument, bad `--timeout`, a link with no checkout or no `testbox.yml`, a `--link` the profile does not have, `--direct` with links |
+| 2 | bad call: unknown profile, missing or invalid `testbox.yml`, unknown flag or missing argument, bad `--timeout`, a link with no checkout or no `testbox.yml`, a `--link` the profile does not have, a bad or repeated `--link`, two links to one checkout or a link that is this checkout, `--direct` with links |
 | 10 | sync error (Mutagen) |
 | 11 | no compatible worker: no worker has the labels, none with the labels sends heartbeats, SSH to the worker fails, or the API answers 503 |
 | 12 | timeout, or the worker stopped during the job (its lease expired) |

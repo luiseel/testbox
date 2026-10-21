@@ -1,3 +1,4 @@
+import type { Stats } from 'fs';
 import { realpath, stat } from 'fs/promises';
 import path from 'path';
 import { loadRepoConfig, SAFE_SEGMENT, type TestboxConfig } from '@testbox/shared';
@@ -31,19 +32,12 @@ export function parseLinkFlags(values: readonly string[] | undefined, cwd: strin
   return overrides;
 }
 
-async function isDirectory(dir: string): Promise<boolean> {
+/** The stat of a path, or null when there is nothing there. */
+async function statOrNull(target: string): Promise<Stats | null> {
   try {
-    return (await stat(dir)).isDirectory();
+    return await stat(target);
   } catch {
-    return false;
-  }
-}
-
-async function isFile(file: string): Promise<boolean> {
-  try {
-    return (await stat(file)).isFile();
-  } catch {
-    return false;
+    return null;
   }
 }
 
@@ -74,7 +68,7 @@ export async function resolveLink(
   const candidates = linkCandidates(configDir, project, name, overrides);
   let dir: string | null = null;
   for (const candidate of candidates) {
-    if (await isDirectory(candidate)) {
+    if ((await statOrNull(candidate))?.isDirectory()) {
       dir = candidate;
       break;
     }
@@ -86,7 +80,7 @@ export async function resolveLink(
   }
   if (await samePlace(dir, configDir)) throw new LinkError(`link ${name}: ${dir} is this checkout`);
   // loadRepoConfig looks in parent folders too; the linked checkout must have its own file.
-  if (!(await isFile(path.join(dir, 'testbox.yml')))) {
+  if (!(await statOrNull(path.join(dir, 'testbox.yml')))?.isFile()) {
     throw new LinkError(`link ${name}: ${dir} has no testbox.yml; run testbox init there`);
   }
   const loaded = await loadRepoConfig(dir);

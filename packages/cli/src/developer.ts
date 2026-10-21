@@ -341,7 +341,8 @@ export class DeveloperApp {
   }
 
   private async hasFlock(): Promise<boolean> {
-    const result = await this.io.remote.run('bash', ['-lc', 'command -v flock'], { timeoutMs: 10_000 });
+    // The same PATH as the spawn in verify, not the login shell's: a plain bash -c.
+    const result = await this.io.remote.run('bash', ['-c', 'command -v flock'], { timeoutMs: 10_000 });
     return result.code === 0;
   }
 
