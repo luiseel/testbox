@@ -9,7 +9,11 @@ import { writeRetention } from './retention';
 
 const execFileAsync = promisify(execFile);
 
-export async function withExclusiveLock<T>(lockPath: string, fn: () => Promise<T>): Promise<T> {
+export async function withExclusiveLock<T>(
+  lockPath: string,
+  fn: () => Promise<T>,
+  opts: { waitSeconds?: number } = {},
+): Promise<T> {
   await mkdir(path.dirname(lockPath), { recursive: true });
   const created = await open(lockPath, 'a');
   await created.close();
@@ -19,6 +23,7 @@ export async function withExclusiveLock<T>(lockPath: string, fn: () => Promise<T
     'flock',
     [
       '-x',
+      ...(opts.waitSeconds !== undefined ? ['-w', String(opts.waitSeconds)] : []),
       lockPath,
       'node',
       '-e',
@@ -29,6 +34,10 @@ export async function withExclusiveLock<T>(lockPath: string, fn: () => Promise<T
   let stderr = '';
   child.stderr.on('data', (chunk: Buffer) => {
     stderr += chunk.toString();
+  });
+  // A missing flock binary: the spawn fails, and the stdout stream closes without "ready".
+  child.once('error', (err) => {
+    stderr += err.message;
   });
   const ready = await readUntil(child.stdout, 'ready\n');
   if (!ready) {

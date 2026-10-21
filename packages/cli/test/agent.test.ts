@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
@@ -673,6 +673,8 @@ describe('agent-facing cli: links', () => {
       await bad(['run', 'make', '--link', 'api=../api', '--link', 'api=../api'], '--link api is given twice');
       await bad(['run', 'make', '--link', 'api=.'], `link api: ${main} is this checkout`);
       await bad(['run', 'make', '--link', 'interface=../api'], '--link interface: a link cannot have the project name interface');
+      await symlink(path.join(root, 'api'), path.join(root, 'api-alias'));
+      await bad(['run', 'make', '--link', 'api=../api', '--link', 'kit=../api-alias'], `link kit: ${path.join(root, 'api-alias')} is the same checkout as link api`);
       const many = Array.from({ length: 21 }, (_, i) => ['--link', `l${i}=../api`]).flat();
       await bad(['run', 'make', ...many], '--link: at most 20 links');
     } finally {

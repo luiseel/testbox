@@ -1,4 +1,4 @@
-import { stat } from 'fs/promises';
+import { realpath, stat } from 'fs/promises';
 import path from 'path';
 import { loadRepoConfig, SAFE_SEGMENT, type TestboxConfig } from '@testbox/shared';
 
@@ -84,7 +84,7 @@ export async function resolveLink(
     const fix = overrides.has(name) ? 'fix the path of --link' : `pass --link ${name}=<path>`;
     throw new LinkError(`link ${name}: no checkout at ${candidates.map(shown).join(' or ')}; ${fix}`);
   }
-  if (path.resolve(dir) === path.resolve(configDir)) throw new LinkError(`link ${name}: ${dir} is this checkout`);
+  if (await samePlace(dir, configDir)) throw new LinkError(`link ${name}: ${dir} is this checkout`);
   // loadRepoConfig looks in parent folders too; the linked checkout must have its own file.
   if (!(await isFile(path.join(dir, 'testbox.yml')))) {
     throw new LinkError(`link ${name}: ${dir} has no testbox.yml; run testbox init there`);
@@ -93,7 +93,16 @@ export async function resolveLink(
   return { name, dir, loaded };
 }
 
-/** Find every link in order. The first link that cannot be used throws. */
+/** True when two paths name one directory, also through a symlink. */
+async function samePlace(a: string, b: string): Promise<boolean> {
+  try {
+    return (await realpath(a)) === (await realpath(b));
+  } catch {
+    return path.resolve(a) === path.resolve(b);
+  }
+}
+
+/** Find every link in order. The first link that cannot be used throws; so do two links to one checkout. */
 export async function resolveLinks(
   configDir: string,
   project: string,
@@ -101,6 +110,14 @@ export async function resolveLinks(
   overrides: Map<string, string>,
 ): Promise<LinkedCheckout[]> {
   const links: LinkedCheckout[] = [];
-  for (const name of names) links.push(await resolveLink(configDir, project, name, overrides));
+  for (const name of names) {
+    const link = await resolveLink(configDir, project, name, overrides);
+    for (const other of links) {
+      if (await samePlace(link.dir, other.dir)) {
+        throw new LinkError(`link ${name}: ${link.dir} is the same checkout as link ${other.name}`);
+      }
+    }
+    links.push(link);
+  }
   return links;
 }

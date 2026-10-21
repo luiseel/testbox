@@ -81,7 +81,7 @@ It prints one line. Send it to that person over a private channel. On their mach
 testbox setup --api-url http://<control-plane-ip>:3000 --token <token>
 ```
 
-`setup` installs Mutagen with Homebrew when it is missing, logs in, makes an SSH key when there is none, and runs `testbox doctor`. The first time, `doctor` shows that the workers refuse the new key, and prints a line like this:
+`setup` installs Mutagen (and `flock`, which `verify` uses to lock a checkout while its sync is paused) with Homebrew when they are missing, logs in, makes an SSH key when there is none, and runs `testbox doctor`. The first time, `doctor` shows that the workers refuse the new key, and prints a line like this:
 
 ```
 fix: send this to an admin: testbox admin authorize 'ssh-ed25519 AAAA… ana@laptop'

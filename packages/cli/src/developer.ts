@@ -59,6 +59,14 @@ export class DeveloperApp {
         return ExitCode.JobFailed;
       }
     }
+    if (process.platform === 'darwin' && !(await this.hasFlock())) {
+      say('installing flock');
+      const brew = await this.io.remote.run('brew', ['install', 'flock'], { onStderr: (text) => this.io.stderr.write(text) });
+      if (brew.code !== 0) {
+        this.out().failure('could not install flock with Homebrew. Run brew install flock, then run testbox setup again.', ExitCode.JobFailed);
+        return ExitCode.JobFailed;
+      }
+    }
     const login = await new TestboxApp(this.io, this.json).login(token, apiUrl);
     if (login !== ExitCode.Pass) return login;
     const key = await this.ensureSshKey();
@@ -125,6 +133,12 @@ export class DeveloperApp {
     if (mutagen) {
       for (const check of await this.checkSyncs()) add(check);
     }
+    // verify holds an OS lock on each checkout while its sync is paused.
+    add(
+      (await this.hasFlock())
+        ? { ok: true, label: 'flock' }
+        : { ok: false, label: 'flock', fix: process.platform === 'darwin' ? 'brew install flock' : 'install util-linux (it has flock)' },
+    );
 
     const workers = (await api.listWorkers()) as Worker[];
     if (workers.length === 0) {
@@ -324,6 +338,11 @@ export class DeveloperApp {
   /** Mutagen commands that do not use SSH (list, terminate). */
   private mutagen(): MutagenSsh {
     return new MutagenSsh(this.io.remote, '');
+  }
+
+  private async hasFlock(): Promise<boolean> {
+    const result = await this.io.remote.run('bash', ['-lc', 'command -v flock'], { timeoutMs: 10_000 });
+    return result.code === 0;
   }
 
   private async hasMutagen(): Promise<boolean> {

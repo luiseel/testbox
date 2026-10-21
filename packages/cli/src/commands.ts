@@ -494,7 +494,6 @@ export class TestboxApp {
         trees.push({ name: link.name, dir: link.dir, ignore: link.loaded.config.ignore, state: linkState });
       }
       const ssh = this.ssh(state.sshHost, user?.identityFile);
-      for (const tree of trees) await ssh.flush(tree.state.sessionName);
       const source = await collectSource(this.io.remote, configDir);
       if (links.length > 0) {
         source.links = [];
@@ -503,6 +502,7 @@ export class TestboxApp {
       if (this.json) output.event({ type: 'source', ...source });
       else output.info(formatJobSource(source));
       if (flags.direct) {
+        await ssh.flush(state.sessionName);
         return await this.direct(ssh, state, command, output, timeoutMs);
       }
       if (!user) return ExitCode.Auth;
@@ -534,8 +534,8 @@ export class TestboxApp {
   }
 
   /**
-   * Pause every session, take one snapshot of all trees, and resume every paused session,
-   * also when the snapshot fails. The main tree is `trees[0]`.
+   * Flush and pause every session, take one snapshot of all trees, and resume every paused session,
+   * also when the snapshot fails. The main tree is `trees[0]`. All of it runs under the lock of each tree.
    */
   private async snapshotTrees(
     ssh: MutagenSsh,
@@ -545,8 +545,11 @@ export class TestboxApp {
     output: Output,
   ): Promise<{ digest: string; relPath: string; workDir?: string }> {
     const [main, ...links] = trees;
-    // Another run on this machine may share a tree (a link of both): hold each tree while its sync is paused.
-    return withSnapshotLocks(trees.map((tree) => tree.dir), () => this.pauseAndSnapshot(ssh, user, main, links, snapshotId, output));
+    // Another run on this machine may share a tree (a link of both): hold each tree from its flush to its resume.
+    return withSnapshotLocks(trees.map((tree) => tree.dir), async () => {
+      for (const tree of trees) await ssh.flush(tree.state.sessionName);
+      return this.pauseAndSnapshot(ssh, user, main, links, snapshotId, output);
+    });
   }
 
   private async pauseAndSnapshot(

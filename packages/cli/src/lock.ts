@@ -1,72 +1,45 @@
-import { mkdir, open, readFile, rm } from 'fs/promises';
+import { realpath } from 'fs/promises';
 import path from 'path';
+import { withExclusiveLock } from '@testbox/shared';
 import { SyncError } from './remote';
 
-const RETRY_MS = 200;
-
-/** The lock file of a checkout: held while its sync is paused for a snapshot. */
+/** The lock file of a checkout: held while its sync is flushed, paused, and copied. */
 export function snapshotLockFile(dir: string): string {
   return path.join(dir, '.testbox', 'snapshot.lock');
 }
 
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === 'EPERM';
-  }
-}
-
-async function acquire(file: string, waitMs: number, now: () => number): Promise<void> {
-  const deadline = now() + waitMs;
-  await mkdir(path.dirname(file), { recursive: true });
-  for (;;) {
-    try {
-      const handle = await open(file, 'wx');
-      await handle.writeFile(`${process.pid}\n`);
-      await handle.close();
-      return;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-    }
-    // A lock of a process that is gone (a killed CLI) is stale: take it over.
-    let holder = NaN;
-    try {
-      holder = Number((await readFile(file, 'utf8')).trim());
-    } catch {
-      // removed between the open and the read: try again
-    }
-    if (Number.isFinite(holder) && holder > 0 && !alive(holder)) {
-      await rm(file, { force: true });
-      continue;
-    }
-    if (now() >= deadline) {
-      throw new SyncError(`another testbox run holds ${file}; wait for it, or delete the file if no testbox runs`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
-  }
+/** The canonical path of each checkout, without duplicates. */
+export async function canonicalDirs(dirs: readonly string[]): Promise<string[]> {
+  const real = await Promise.all(dirs.map((dir) => realpath(dir)));
+  return [...new Set(real)];
 }
 
 /**
  * Hold the snapshot lock of each checkout while `fn` runs, so two runs on this machine that share a
- * checkout (a link of both) do not pause and resume its sync under each other's snapshot. The locks are
- * taken in path order, so two runs that share several checkouts cannot wait on each other forever.
+ * checkout (a link of both) do not flush, pause, and resume its sync under each other's snapshot.
+ * The lock is an OS lock (`flock`), so a killed CLI releases it. The locks are taken in path order,
+ * so two runs that share several checkouts cannot wait on each other forever.
  */
 export async function withSnapshotLocks<T>(
   dirs: readonly string[],
   fn: () => Promise<T>,
-  opts: { waitMs?: number; now?: () => number } = {},
+  opts: { waitSeconds?: number } = {},
 ): Promise<T> {
-  const files = [...new Set(dirs.map((dir) => snapshotLockFile(dir)))].sort();
-  const held: string[] = [];
-  try {
-    for (const file of files) {
-      await acquire(file, opts.waitMs ?? 15 * 60 * 1000, opts.now ?? Date.now);
-      held.push(file);
+  const files = (await canonicalDirs(dirs)).map((dir) => snapshotLockFile(dir)).sort();
+  const waitSeconds = opts.waitSeconds ?? 15 * 60;
+  const hold = async (index: number): Promise<T> => {
+    if (index === files.length) return fn();
+    const file = files[index];
+    try {
+      return await withExclusiveLock(file, () => hold(index + 1), { waitSeconds });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.startsWith('failed to acquire lock')) throw err;
+      if (/ENOENT/.test(message)) {
+        throw new SyncError('flock is missing; install it (macOS: brew install flock), then run again');
+      }
+      throw new SyncError(`another testbox run holds ${file}; wait for it, then run again`);
     }
-    return await fn();
-  } finally {
-    for (const file of held.reverse()) await rm(file, { force: true });
-  }
+  };
+  return hold(0);
 }
