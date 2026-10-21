@@ -33,7 +33,7 @@ import {
   type WorkerSession,
   type WorkspaceState,
 } from './config-store';
-import { attachInterrupt } from './interrupt';
+import { attachInterrupt, watchDetach } from './interrupt';
 import { withSnapshotLocks } from './lock';
 import { Output, type Summary, type TextSink } from './output';
 import { mutagenDestination, MutagenSsh, RemoteUnavailable, SyncError, type RemoteRunner } from './remote';
@@ -482,13 +482,21 @@ export class TestboxApp {
       }
       if (!user) return ExitCode.Auth;
       const api = this.api(user);
-      // Another run on this machine may share a checkout (a link of both): hold every checkout from the
-      // first read of its workspace state to the resume of its sync, so the two runs take turns.
-      const submitted = await withSnapshotLocks([configDir, ...links.map((link) => link.dir)], () =>
-        this.submit(loaded, links, user, api, command, profileName, profile, flags, output, timeoutMs),
-      );
+      // A SIGTERM during the submit (a tool's time limit) must still end in a summary: the submit
+      // finishes, and the CLI then detaches instead of following.
+      const stop = watchDetach(this.io.signals);
+      let submitted: { job: { id: string; state: string } };
+      try {
+        // Another run on this machine may share a checkout (a link of both): hold every checkout from the
+        // first read of its workspace state to the resume of its sync, so the two runs take turns.
+        submitted = await withSnapshotLocks([configDir, ...links.map((link) => link.dir)], () =>
+          this.submit(loaded, links, user, api, command, profileName, profile, flags, output, timeoutMs),
+        );
+      } finally {
+        stop.dispose();
+      }
       output.event({ type: 'status', state: submitted.job.state, jobId: submitted.job.id });
-      if (flags.detach) {
+      if (flags.detach || stop.requested()) {
         output.summary(detachedSummary(submitted.job.id));
         return ExitCode.Pass;
       }

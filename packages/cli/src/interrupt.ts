@@ -16,6 +16,23 @@ const DETACH_SIGNALS = ['SIGTERM', 'SIGHUP'] as const;
  * The first SIGTERM or SIGHUP removes their handlers, so a second one ends the process at once.
  * SIGTERM after a Ctrl-C still detaches: the cancel is sent, and the CLI stops following.
  */
+/**
+ * Watch for SIGTERM and SIGHUP while a job is submitted, before `follow` has its own handlers.
+ * The signal does not end the process; the submit finishes, and the caller then stops instead of following.
+ */
+export function watchDetach(signals: EventEmitter): { requested: () => boolean; dispose: () => void } {
+  let requested = false;
+  const dispose = () => {
+    for (const name of DETACH_SIGNALS) signals.off(name, onSignal);
+  };
+  const onSignal = () => {
+    requested = true;
+    dispose();
+  };
+  for (const name of DETACH_SIGNALS) signals.on(name, onSignal);
+  return { requested: () => requested, dispose };
+}
+
 export function attachInterrupt(opts: InterruptOptions): () => void {
   let decided = false;
   let prompting = false;

@@ -88,7 +88,7 @@ export async function resolveLink(
 }
 
 /** True when two paths name one directory, also through a symlink. */
-async function samePlace(a: string, b: string): Promise<boolean> {
+export async function samePlace(a: string, b: string): Promise<boolean> {
   try {
     return (await realpath(a)) === (await realpath(b));
   } catch {

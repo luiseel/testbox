@@ -6,7 +6,7 @@ import { Output } from './output';
 import { CliApiError, HttpApi } from './api-client';
 import { exitCodeForFailure, TestboxApp, type CliIO } from './commands';
 import { readUserConfig, type UserConfig } from './config-store';
-import { resolveLink } from './links';
+import { resolveLink, samePlace, type LinkedCheckout } from './links';
 import { MutagenSsh } from './remote';
 import { classifySessions, loadRootState, staleReason } from './sessions';
 
@@ -289,16 +289,30 @@ export class DeveloperApp {
             : 'no worker has these labels; change requires, or an admin adds a worker with --labels',
         });
       }
-      for (const link of profile.links) checks.push(await this.checkLink(configDir, config.project, name, link));
+      const found: LinkedCheckout[] = [];
+      for (const link of profile.links) checks.push(await this.checkLink(configDir, config.project, name, link, found));
     }
     return checks;
   }
 
-  /** One check per link of a profile: the CLI finds its checkout, and the checkout has a testbox.yml. */
-  private async checkLink(configDir: string, project: string, profile: string, link: string): Promise<Check> {
+  /**
+   * One check per link of a profile: the CLI finds its checkout, the checkout has a testbox.yml, and it is
+   * not the checkout of another link of the profile (verify rejects that too).
+   */
+  private async checkLink(configDir: string, project: string, profile: string, link: string, found: LinkedCheckout[]): Promise<Check> {
     try {
-      const found = await resolveLink(configDir, project, link, new Map());
-      return { ok: true, label: `link ${link} of ${profile}: ${found.dir}` };
+      const checkout = await resolveLink(configDir, project, link, new Map());
+      for (const other of found) {
+        if (await samePlace(checkout.dir, other.dir)) {
+          return {
+            ok: false,
+            label: `link ${link} of ${profile}: ${checkout.dir} is the same checkout as link ${other.name}`,
+            fix: `give link ${link} its own checkout (--link ${link}=<path>), or remove it from the profile`,
+          };
+        }
+      }
+      found.push(checkout);
+      return { ok: true, label: `link ${link} of ${profile}: ${checkout.dir}` };
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       return {

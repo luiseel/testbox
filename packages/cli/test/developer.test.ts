@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
@@ -114,6 +114,14 @@ describe('testbox doctor', () => {
       expect(text).toContain('✓ profile unit');
       expect(text).toContain(`✓ link api of ios: ${path.join(home, 'api')}`);
       expect(text).toContain('✗ link web of ios: no checkout at ../web\n    fix: pass --link web=<path>, or clone it next to this checkout');
+
+      // Two links to one checkout (here through a symlink): verify rejects it, so doctor must say so.
+      await symlink(path.join(home, 'api'), path.join(home, 'web'));
+      out.length = 0;
+      expect(await runCli(['doctor'], io(home, repo, remote, fetchImpl, out))).toBe(1);
+      expect(out.join('')).toContain(
+        `✗ link web of ios: ${path.join(home, 'web')} is the same checkout as link api\n    fix: give link web its own checkout (--link web=<path>), or remove it from the profile`,
+      );
     } finally {
       await rm(home, { recursive: true, force: true });
     }

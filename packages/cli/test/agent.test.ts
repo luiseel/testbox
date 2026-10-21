@@ -319,6 +319,39 @@ describe('agent-facing cli: detach and run --profile', () => {
     }
   });
 
+  it('keeps a SIGTERM that arrives during the submit: the job is queued, then the CLI detaches', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
+    const project = await mkdtemp(path.join(os.tmpdir(), 'tb-proj-'));
+    const stdout: string[] = [];
+    const seen: string[] = [];
+    try {
+      await loggedIn(home);
+      await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
+      const cli = io(home, project, quietRemote, stdout, [], fakeApi(seen));
+      cli.remote = {
+        async run(file, args) {
+          // The snapshot is the long step of a submit: the harness's time limit lands here.
+          if ((args.at(-1) ?? '').includes('snapshot-cli')) cli.signals.emit('SIGTERM');
+          return quietRemote.run(file, args);
+        },
+      };
+      expect(await runCli(['verify', 'unit', '--json'], cli)).toBe(0);
+      expect(jsonLines(stdout).at(-1)).toMatchObject({
+        type: 'summary',
+        jobId: 'job_9',
+        state: 'detached',
+        exit: 0,
+        hint: 'the job continues on the worker: testbox logs job_9 --follow, or testbox status job_9',
+      });
+      expect(seen).toContain('POST /v1/jobs');
+      expect(seen.some((request) => request.endsWith('/events'))).toBe(false);
+      expect(cli.signals.listenerCount('SIGTERM')).toBe(0);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+      await rm(project, { recursive: true, force: true });
+    }
+  });
+
   it('gives the --detach summary the same hint', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
     const project = await mkdtemp(path.join(os.tmpdir(), 'tb-proj-'));
