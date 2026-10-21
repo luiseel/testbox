@@ -85,6 +85,20 @@ export class UsageError extends Error {
 
 type LoadedConfig = { file: string; config: TestboxConfig };
 
+/** What one submit needs: the checkout and its links, the user and API, and the job's command and settings. */
+interface Submission {
+  loaded: LoadedConfig;
+  links: LinkedCheckout[];
+  user: UserConfig;
+  api: HttpApi;
+  command: string;
+  profileName: string | null;
+  profile: ProfileConfig | null;
+  flags: CommonFlags;
+  output: Output;
+  timeoutMs: number;
+}
+
 /**
  * The job log on disk, so a caller can read it again after the stream ended (or with --quiet).
  * A file that cannot be written never fails the job: `error` says why, and the lines are dropped.
@@ -490,7 +504,7 @@ export class TestboxApp {
         // Another run on this machine may share a checkout (a link of both): hold every checkout from the
         // first read of its workspace state to the resume of its sync, so the two runs take turns.
         submitted = await withSnapshotLocks([configDir, ...links.map((link) => link.dir)], () =>
-          this.submit(loaded, links, user, api, command, profileName, profile, flags, output, timeoutMs),
+          this.submit({ loaded, links, user, api, command, profileName, profile, flags, output, timeoutMs }),
         );
       } catch (err) {
         stop.dispose();
@@ -522,18 +536,8 @@ export class TestboxApp {
   }
 
   /** Under the checkout locks: workspaces and sessions, the snapshot, and the job. */
-  private async submit(
-    loaded: LoadedConfig,
-    links: LinkedCheckout[],
-    user: UserConfig,
-    api: HttpApi,
-    command: string,
-    profileName: string | null,
-    profile: ProfileConfig | null,
-    flags: CommonFlags,
-    output: Output,
-    timeoutMs: number,
-  ): Promise<{ job: { id: string; state: string } }> {
+  private async submit(input: Submission): Promise<{ job: { id: string; state: string } }> {
+    const { loaded, links, user, api, command, profileName, profile, flags, output, timeoutMs } = input;
     {
       const configDir = path.dirname(loaded.file);
       const requires = profile?.requires ?? [];
