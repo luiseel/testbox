@@ -78,6 +78,7 @@ function encodeJob(job: JobRecord): Record<string, string> {
     snapshotId: job.snapshotId,
     snapshotRelPath: job.snapshotRelPath,
     snapshotDigest: job.snapshotDigest,
+    snapshotWorkDir: job.snapshotWorkDir ?? '',
     ownerId: job.ownerId,
     command: job.command,
     profile: job.profile ?? '',
@@ -112,6 +113,7 @@ function decodeJob(raw: Record<string, string>): JobRecord | null {
     snapshotId: raw.snapshotId,
     snapshotRelPath: raw.snapshotRelPath,
     snapshotDigest: raw.snapshotDigest,
+    snapshotWorkDir: raw.snapshotWorkDir || null,
     ownerId: raw.ownerId,
     command: raw.command,
     profile: raw.profile ? raw.profile : null,
@@ -267,6 +269,7 @@ export class JobStore {
       ownerId: snapshot.ownerId,
       relPath: snapshot.relPath,
       digest: snapshot.digest,
+      workDir: snapshot.workDir ?? '',
       createdAt: String(snapshot.createdAt),
     });
   }
@@ -280,6 +283,7 @@ export class JobStore {
       ownerId: raw.ownerId,
       relPath: raw.relPath,
       digest: raw.digest,
+      workDir: raw.workDir || undefined,
       createdAt: Number(raw.createdAt || 0),
     };
   }

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile, mkdir } from 'fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile, mkdir } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
@@ -8,6 +8,7 @@ import {
   createSnapshot,
   directoryDigest,
   ensureDependencies,
+  snapshotLockPath,
   withExclusiveLock,
   writeRetention,
 } from '../src';
@@ -35,6 +36,96 @@ describe('snapshots', () => {
     await expect(readFile(path.join(dataDir, snap.relPath, 'node_modules', 'left.txt'), 'utf8')).rejects.toThrow();
     expect(snap.digest).toBe(await directoryDigest(path.join(dataDir, snap.relPath)));
     await rm(dataDir, { recursive: true, force: true });
+  });
+
+  it('puts the main tree and each link in sibling folders, with their own excludes and one digest', async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), 'snap-'));
+    const mainRel = 'workspaces/usr_a/interface/ws_1';
+    const apiRel = 'workspaces/usr_a/api/ws_2';
+    await mkdir(path.join(dataDir, mainRel, 'ios'), { recursive: true });
+    await writeFile(path.join(dataDir, mainRel, 'ios', 'App.swift'), 'app\n');
+    await writeFile(path.join(dataDir, mainRel, 'skip-main.txt'), 'x\n');
+    await mkdir(path.join(dataDir, apiRel, 'client'), { recursive: true });
+    await writeFile(path.join(dataDir, apiRel, 'client', 'Package.swift'), 'pkg\n');
+    await writeFile(path.join(dataDir, apiRel, 'skip-api.txt'), 'x\n');
+    await writeFile(path.join(dataDir, apiRel, 'skip-main.txt'), 'kept\n');
+    try {
+      const snap = await createSnapshot({
+        dataDir,
+        stagingRel: mainRel,
+        snapshotId: 'snap_bbbbbbbbbbbbbbbbbbbbbbbb',
+        ignore: ['skip-main.txt'],
+        retentionMs: 1000,
+        workDir: 'interface',
+        links: [{ name: 'api', stagingRel: apiRel, ignore: ['skip-api.txt'] }],
+      });
+      expect(snap).toMatchObject({ relPath: 'snapshots/snap_bbbbbbbbbbbbbbbbbbbbbbbb', workDir: 'interface' });
+      const root = path.join(dataDir, snap.relPath);
+      expect((await readdir(root)).sort()).toEqual(['api', 'interface']);
+      // The job runs in <root>/interface, so ../api is the linked checkout.
+      expect(await readFile(path.join(root, 'interface', '..', 'api', 'client', 'Package.swift'), 'utf8')).toBe('pkg\n');
+      expect(await readFile(path.join(root, 'interface', 'ios', 'App.swift'), 'utf8')).toBe('app\n');
+      await expect(readFile(path.join(root, 'interface', 'skip-main.txt'))).rejects.toThrow();
+      await expect(readFile(path.join(root, 'api', 'skip-api.txt'))).rejects.toThrow();
+      expect(await readFile(path.join(root, 'api', 'skip-main.txt'), 'utf8')).toBe('kept\n');
+      expect(snap.digest).toBe(await directoryDigest(root));
+      expect(snap.digest).not.toBe(await directoryDigest(path.join(root, 'interface')));
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the old layout without links, and waits for the lock of a linked tree', async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), 'snap-'));
+    const mainRel = 'workspaces/usr_a/interface/ws_1';
+    const apiRel = 'workspaces/usr_a/api/ws_2';
+    await mkdir(path.join(dataDir, mainRel), { recursive: true });
+    await mkdir(path.join(dataDir, apiRel), { recursive: true });
+    await writeFile(path.join(dataDir, mainRel, 'a.txt'), 'a\n');
+    try {
+      const plain = await createSnapshot({ dataDir, stagingRel: mainRel, snapshotId: 'snap_cccccccccccccccccccccccc', ignore: [], retentionMs: 1000 });
+      expect(plain.workDir).toBeUndefined();
+      expect(await readFile(path.join(dataDir, plain.relPath, 'a.txt'), 'utf8')).toBe('a\n');
+
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const held = new Promise<void>((resolve) => {
+        void withExclusiveLock(snapshotLockPath(dataDir, apiRel), async () => {
+          resolve();
+          await gate;
+        });
+      });
+      await held;
+      let done = false;
+      const linked = createSnapshot({
+        dataDir,
+        stagingRel: mainRel,
+        snapshotId: 'snap_dddddddddddddddddddddddd',
+        ignore: [],
+        retentionMs: 1000,
+        workDir: 'interface',
+        links: [{ name: 'api', stagingRel: apiRel, ignore: [] }],
+      }).then(() => {
+        done = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(done).toBe(false);
+      release();
+      await linked;
+      expect(done).toBe(true);
+      await expect(createSnapshot({
+        dataDir,
+        stagingRel: mainRel,
+        snapshotId: 'snap_eeeeeeeeeeeeeeeeeeeeeeee',
+        ignore: [],
+        retentionMs: 1000,
+        links: [{ name: 'api', stagingRel: apiRel, ignore: [] }],
+      })).rejects.toThrow('needs a work dir');
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
   });
 
   it('serializes snapshot creators with the workspace lock', async () => {

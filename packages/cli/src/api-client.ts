@@ -104,7 +104,10 @@ export class HttpApi {
     return this.request('DELETE', `/v1/workspaces/${id}`);
   }
 
-  registerSnapshot(workspaceId: string, snapshot: { id: string; digest: string }): Promise<{ id: string; digest: string; relPath: string }> {
+  registerSnapshot(
+    workspaceId: string,
+    snapshot: { id: string; digest: string; workDir?: string },
+  ): Promise<{ id: string; digest: string; relPath: string; workDir?: string }> {
     return this.request('POST', `/v1/workspaces/${workspaceId}/snapshots`, snapshot);
   }
 

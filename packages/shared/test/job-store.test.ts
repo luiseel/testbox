@@ -83,6 +83,7 @@ function baseJob(prefix: string, patch: Partial<JobRecord> = {}): JobRecord {
     snapshotId: 'snap_aaaaaaaaaaaaaaaaaaaaaaaa',
     snapshotRelPath: 'snapshots/snap_aaaaaaaaaaaaaaaaaaaaaaaa',
     snapshotDigest: 'ab'.repeat(32),
+    snapshotWorkDir: null,
     ownerId: 'usr_test',
     command: 'true',
     profile,

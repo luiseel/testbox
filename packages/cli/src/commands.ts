@@ -34,6 +34,7 @@ import {
 import { attachInterrupt } from './interrupt';
 import { Output, type TextSink } from './output';
 import { mutagenDestination, MutagenSsh, RemoteUnavailable, SyncError, type RemoteRunner } from './remote';
+import { LinkError, parseLinkFlags, resolveLinks } from './links';
 import { collectSource } from './source';
 
 export interface CliIO {
@@ -58,6 +59,17 @@ interface CommonFlags {
   sshHost?: string;
   profile?: string;
   quiet?: boolean;
+  /** `--link <name>=<path>`, repeatable. */
+  link?: string[];
+}
+
+/** One checkout that is synced to the worker for a job: the main checkout or a link. */
+interface SyncedTree {
+  /** The folder name in the snapshot: the project for the main tree, the link name for a link. */
+  name: string;
+  dir: string;
+  ignore: string[];
+  state: WorkspaceState;
 }
 
 /** Wrong arguments: the CLI exits 2, so a caller does not read it as a failed job. */
@@ -162,6 +174,7 @@ export class TestboxApp {
         command: profile.cmd,
         requires: profile.requires,
         artifacts: profile.artifacts,
+        links: profile.links,
       }));
       if (this.json) {
         output.event({ type: 'profiles', file: loaded.file, project: loaded.config.project, profiles });
@@ -435,28 +448,42 @@ export class TestboxApp {
     try {
       const timeoutMs = this.timeoutMs(flags);
       const loaded = await loadRepoConfig(this.io.cwd);
+      const configDir = path.dirname(loaded.file);
+      const overrides = parseLinkFlags(flags.link, this.io.cwd);
+      const linkNames = jobLinkNames(profileName, profile, overrides);
+      if (flags.direct && linkNames.length > 0) throw new UsageError('links need the control plane; run without --direct');
+      // Find every linked checkout before any network call: a missing one is a mistake in the call.
+      const links = await resolveLinks(configDir, loaded.config.project, linkNames, overrides);
       const user = await this.requireUser(flags.direct === true);
-      let state = await this.resolveState(loaded, flags, user, output, profile?.requires ?? []);
-      let targetWorkerId: string | undefined;
+      const requires = profile?.requires ?? [];
+      let state = await this.resolveState(loaded, flags, user, output, requires);
+      let worker: { id: string; sshHost: string } | null = null;
       if (!flags.direct && user) {
-        const selected = await this.api(user).selectWorker({
-          requires: profile?.requires ?? [],
-          workspaceId: state.id,
-        });
+        const selected = await this.api(user).selectWorker({ requires, workspaceId: state.id });
         if (selected?.sshHost) {
-          state = await this.ensureWorkerSession(
-            state,
-            { id: selected.id, sshHost: selected.sshHost },
-            path.dirname(loaded.file),
-            loaded.config.ignore,
-            user.identityFile,
-          );
-          targetWorkerId = selected.id;
+          worker = { id: selected.id, sshHost: selected.sshHost };
+          state = await this.ensureWorkerSession(state, worker, configDir, loaded.config.ignore, user.identityFile);
         }
       }
+      // The main tree first, then each link. Each tree is a checkout with its own workspace and session.
+      const trees: SyncedTree[] = [{ name: loaded.config.project, dir: configDir, ignore: loaded.config.ignore, state }];
+      for (const link of links) {
+        // --workspace names the workspace of the main checkout, not of a link.
+        let linkState = await this.resolveState(link.loaded, { ...flags, workspace: undefined }, user, output, requires);
+        if (worker) {
+          linkState = await this.ensureWorkerSession(linkState, worker, link.dir, link.loaded.config.ignore, user?.identityFile);
+        } else if (linkState.sshHost !== state.sshHost) {
+          throw new RemoteUnavailable(`link ${link.name} syncs to ${linkState.sshHost}, not to ${state.sshHost}; start a worker, then run again`);
+        }
+        trees.push({ name: link.name, dir: link.dir, ignore: link.loaded.config.ignore, state: linkState });
+      }
       const ssh = this.ssh(state.sshHost, user?.identityFile);
-      await ssh.flush(state.sessionName);
-      const source = await collectSource(this.io.remote, path.dirname(loaded.file));
+      for (const tree of trees) await ssh.flush(tree.state.sessionName);
+      const source = await collectSource(this.io.remote, configDir);
+      if (links.length > 0) {
+        source.links = [];
+        for (const link of links) source.links.push({ name: link.name, ...(await collectSource(this.io.remote, link.dir)) });
+      }
       if (this.json) output.event({ type: 'source', ...source });
       else output.info(formatJobSource(source));
       if (flags.direct) {
@@ -464,36 +491,19 @@ export class TestboxApp {
       }
       if (!user) return ExitCode.Auth;
       const snapshotId = createId('snap');
-      await ssh.pause(state.sessionName);
-      let digested: { digest: string; relPath: string } | undefined;
-      try {
-        digested = await ssh.snapshot({
-          remoteRoot: state.remoteRoot,
-          snapshotBin: user.snapshotBin ?? 'testbox/app/packages/worker/dist/snapshot-cli.js',
-          stagingRel: state.stagingRel,
-          snapshotId,
-          ignore: loaded.config.ignore,
-        });
-      } finally {
-        try {
-          await ssh.resume(state.sessionName);
-        } catch (err) {
-          output.error(err instanceof Error ? err.message : 'mutagen resume failed');
-        }
-      }
-      if (!digested) throw new SyncError('snapshot failed');
+      const digested = await this.snapshotTrees(ssh, user, trees, snapshotId, output);
       const api = this.api(user);
-      await api.registerSnapshot(state.id, { id: snapshotId, digest: digested.digest });
+      await api.registerSnapshot(state.id, { id: snapshotId, digest: digested.digest, workDir: digested.workDir });
       const created = await api.createJob({
         workspaceId: state.id,
         snapshotId,
         command,
         profile: profileName,
         artifactGlobs: profile?.artifacts ?? [],
-        requires: profile?.requires ?? [],
+        requires,
         priority: flags.priority ? Number(flags.priority) : 0,
         timeoutMs,
-        targetWorkerId,
+        targetWorkerId: worker?.id,
         source,
       });
       output.event({ type: 'status', state: created.job.state, jobId: created.job.id });
@@ -504,6 +514,44 @@ export class TestboxApp {
       return await this.follow(api, created.job.id, output, this.logFile(state.configDir, created.job.id));
     } catch (err) {
       return this.fail(output, err);
+    }
+  }
+
+  /**
+   * Pause every session, take one snapshot of all trees, and resume every paused session,
+   * also when the snapshot fails. The main tree is `trees[0]`.
+   */
+  private async snapshotTrees(
+    ssh: MutagenSsh,
+    user: UserConfig,
+    trees: SyncedTree[],
+    snapshotId: string,
+    output: Output,
+  ): Promise<{ digest: string; relPath: string; workDir?: string }> {
+    const [main, ...links] = trees;
+    const paused: SyncedTree[] = [];
+    try {
+      for (const tree of trees) {
+        await ssh.pause(tree.state.sessionName);
+        paused.push(tree);
+      }
+      return await ssh.snapshot({
+        remoteRoot: main.state.remoteRoot,
+        snapshotBin: user.snapshotBin ?? 'testbox/app/packages/worker/dist/snapshot-cli.js',
+        stagingRel: main.state.stagingRel,
+        snapshotId,
+        ignore: main.ignore,
+        workDir: links.length > 0 ? main.name : undefined,
+        links: links.map((link) => ({ name: link.name, stagingRel: link.state.stagingRel, ignore: link.ignore })),
+      });
+    } finally {
+      for (const tree of paused) {
+        try {
+          await ssh.resume(tree.state.sessionName);
+        } catch (err) {
+          output.error(err instanceof Error ? err.message : 'mutagen resume failed');
+        }
+      }
     }
   }
 
@@ -787,8 +835,23 @@ export class TestboxApp {
 export function exitCodeForFailure(err: unknown): number {
   if (err instanceof SyncError) return ExitCode.SyncError;
   if (err instanceof RemoteUnavailable) return ExitCode.NoWorker;
-  if (err instanceof UsageError || err instanceof ConfigError) return ExitCode.Usage;
+  if (err instanceof UsageError || err instanceof ConfigError || err instanceof LinkError) return ExitCode.Usage;
   return exitCodeForCliError(err) ?? ExitCode.JobFailed;
+}
+
+/**
+ * The links of a job. verify: the links of the profile; `--link` only changes where one is.
+ * run: the names given with `--link`.
+ */
+function jobLinkNames(profileName: string | null, profile: ProfileConfig | null, overrides: Map<string, string>): string[] {
+  if (!profile) return [...overrides.keys()];
+  for (const name of overrides.keys()) {
+    if (!profile.links.includes(name)) {
+      const known = profile.links.length ? `its links are: ${profile.links.join(', ')}` : 'it has no links';
+      throw new UsageError(`--link ${name}: profile ${profileName ?? ''} has no link ${name}; ${known}`);
+    }
+  }
+  return profile.links;
 }
 
 /** Stable id for one checkout directory, so two checkouts of a repo get two folders on the worker. */

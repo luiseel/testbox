@@ -1,0 +1,106 @@
+import { stat } from 'fs/promises';
+import path from 'path';
+import { loadRepoConfig, SAFE_SEGMENT, type TestboxConfig } from '@testbox/shared';
+
+/** A link of a profile, found on disk: its name, its checkout, and the testbox.yml of that checkout. */
+export interface LinkedCheckout {
+  name: string;
+  dir: string;
+  loaded: { file: string; config: TestboxConfig };
+}
+
+/** A link that cannot be used. The CLI exits 2 for it: the call or the checkout layout is wrong, not the code. */
+export class LinkError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'LinkError';
+  }
+}
+
+/** Read the repeatable `--link <name>=<path>` flag. A relative path is relative to `cwd`. */
+export function parseLinkFlags(values: readonly string[] | undefined, cwd: string): Map<string, string> {
+  const overrides = new Map<string, string>();
+  for (const value of values ?? []) {
+    const at = value.indexOf('=');
+    const name = at > 0 ? value.slice(0, at) : '';
+    const dir = at > 0 ? value.slice(at + 1) : '';
+    if (!SAFE_SEGMENT.test(name) || !dir) throw new LinkError(`invalid --link ${value}: pass --link <name>=<path>`);
+    if (overrides.has(name)) throw new LinkError(`--link ${name} is given twice`);
+    overrides.set(name, path.resolve(cwd, dir));
+  }
+  return overrides;
+}
+
+async function isDirectory(dir: string): Promise<boolean> {
+  try {
+    return (await stat(dir)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+async function isFile(file: string): Promise<boolean> {
+  try {
+    return (await stat(file)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The places to look for the checkout of link `name`, in order: the `--link` path; for a
+ * checkout folder `<project>_<suffix>`, the sibling `<name>_<suffix>`; the sibling `<name>`.
+ */
+export function linkCandidates(configDir: string, project: string, name: string, overrides: Map<string, string>): string[] {
+  const override = overrides.get(name);
+  if (override) return [override];
+  const parent = path.dirname(configDir);
+  const base = path.basename(configDir);
+  const candidates: string[] = [];
+  if (base.startsWith(`${project}_`) && base.length > project.length + 1) {
+    candidates.push(path.join(parent, `${name}_${base.slice(project.length + 1)}`));
+  }
+  candidates.push(path.join(parent, name));
+  return candidates;
+}
+
+/** Find the checkout of one link and load its testbox.yml. Throws LinkError when there is none. */
+export async function resolveLink(
+  configDir: string,
+  project: string,
+  name: string,
+  overrides: Map<string, string>,
+): Promise<LinkedCheckout> {
+  const candidates = linkCandidates(configDir, project, name, overrides);
+  let dir: string | null = null;
+  for (const candidate of candidates) {
+    if (await isDirectory(candidate)) {
+      dir = candidate;
+      break;
+    }
+  }
+  const shown = (candidate: string) => path.relative(configDir, candidate) || '.';
+  if (!dir) {
+    const fix = overrides.has(name) ? 'fix the path of --link' : `pass --link ${name}=<path>`;
+    throw new LinkError(`link ${name}: no checkout at ${candidates.map(shown).join(' or ')}; ${fix}`);
+  }
+  if (path.resolve(dir) === path.resolve(configDir)) throw new LinkError(`link ${name}: ${dir} is this checkout`);
+  // loadRepoConfig looks in parent folders too; the linked checkout must have its own file.
+  if (!(await isFile(path.join(dir, 'testbox.yml')))) {
+    throw new LinkError(`link ${name}: ${dir} has no testbox.yml; run testbox init there`);
+  }
+  const loaded = await loadRepoConfig(dir);
+  return { name, dir, loaded };
+}
+
+/** Find every link in order. The first link that cannot be used throws. */
+export async function resolveLinks(
+  configDir: string,
+  project: string,
+  names: readonly string[],
+  overrides: Map<string, string>,
+): Promise<LinkedCheckout[]> {
+  const links: LinkedCheckout[] = [];
+  for (const name of names) links.push(await resolveLink(configDir, project, name, overrides));
+  return links;
+}

@@ -169,7 +169,11 @@ export class MutagenSsh {
     stagingRel: string;
     snapshotId: string;
     ignore: string[];
-  }): Promise<{ digest: string; relPath: string }> {
+    /** The folder of the main tree when there are links (the project name). */
+    workDir?: string;
+    /** Other staging trees, copied next to the main tree. */
+    links?: { name: string; stagingRel: string; ignore: string[] }[];
+  }): Promise<{ digest: string; relPath: string; workDir?: string }> {
     const dataRel = opts.remoteRoot.replace(/^~\//, '');
     const binRel = opts.snapshotBin.replace(/^~\//, '');
     const args = [
@@ -182,12 +186,21 @@ export class MutagenSsh {
       quoteShellArg(opts.snapshotId),
     ];
     for (const pattern of opts.ignore) args.push('--ignore', quoteShellArg(pattern));
+    const links = opts.links ?? [];
+    if (links.length > 0) {
+      if (!opts.workDir) throw new SyncError('a snapshot with links needs a work dir');
+      args.push('--work-dir', quoteShellArg(opts.workDir));
+      for (const link of links) {
+        args.push('--link', quoteShellArg(`${link.name}=${link.stagingRel}`));
+        for (const pattern of link.ignore) args.push('--link-ignore', quoteShellArg(`${link.name}=${pattern}`));
+      }
+    }
     // The worker setup links node and flock into <data dir>/bin; an SSH
     // command does not read shell profiles, so put it first on PATH.
     const script = `PATH="$HOME/${dataRel}/bin:$PATH" node ${args.join(' ')}`;
     const result = await this.ssh(`bash -c ${quoteShellArg(script)}`);
     if (result.code !== 0) throw new SyncError(result.stderr || 'snapshot failed');
-    return JSON.parse(result.stdout) as { digest: string; relPath: string };
+    return JSON.parse(result.stdout) as { digest: string; relPath: string; workDir?: string };
   }
 }
 

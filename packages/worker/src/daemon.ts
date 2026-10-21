@@ -240,7 +240,7 @@ export class Daemon {
       if (!running.ok) return;
 
       const result = await runCommand({
-        cwd: resolveInside(this.opts.dataDir, job.snapshotRelPath),
+        cwd: jobCwd(this.opts.dataDir, job),
         env: this.jobEnv(job.id, mise),
         timeoutMs: job.timeoutMs,
         graceMs: this.opts.graceMs ?? 2_000,
@@ -284,11 +284,12 @@ export class Daemon {
   }
 
   private async prepare(job: JobRecord): Promise<{ mise: boolean }> {
-    const cwd = resolveInside(this.opts.dataDir, job.snapshotRelPath);
-    const actual = await directoryDigest(cwd);
+    // The digest covers the whole snapshot, links included; the job runs in its work dir.
+    const actual = await directoryDigest(resolveInside(this.opts.dataDir, job.snapshotRelPath));
     if (actual !== job.snapshotDigest) {
       throw new Error('snapshot digest mismatch');
     }
+    const cwd = jobCwd(this.opts.dataDir, job);
     const mise = await this.useMise(job, cwd);
     if (mise) await this.miseInstall(job, cwd);
     const fingerprint = await fingerprintFromDirectory(cwd, await probeRuntime());
@@ -346,7 +347,7 @@ export class Daemon {
 
   private async collect(job: JobRecord): Promise<void> {
     if (!this.opts.apiUrl || !this.opts.workerToken || job.artifactGlobs.length === 0) return;
-    const cwd = resolveInside(this.opts.dataDir, job.snapshotRelPath);
+    const cwd = jobCwd(this.opts.dataDir, job);
     const files = await collectArtifacts(cwd, job.artifactGlobs, 50 * 1024 * 1024);
     await uploadArtifacts({
       apiUrl: this.opts.apiUrl,
@@ -449,6 +450,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<Daemon> {
 }
 
 /** The job shell under `mise exec`, with the job marker as `$0` like the plain path. */
+/** Where the job runs: the snapshot root, or its main tree when the snapshot has links. */
+function jobCwd(dataDir: string, job: JobRecord): string {
+  return resolveInside(dataDir, path.posix.join(job.snapshotRelPath, job.snapshotWorkDir ?? ''));
+}
+
 function jobShellArgv(job: JobRecord): string[] {
   const spec = buildShellSpawn(job.command, job.id);
   return [spec.file, ...spec.args];

@@ -2,6 +2,7 @@ import { readFile } from 'fs/promises';
 import path from 'path';
 import { parse } from 'yaml';
 import { z } from 'zod';
+import { SAFE_SEGMENT } from './paths';
 
 export const DEFAULT_IGNORE = [
   'node_modules',
@@ -21,6 +22,11 @@ const profileObject = z.object({
   cmd: z.string().min(1),
   artifacts: z.array(z.string()).default([]),
   requires: z.array(z.string()).default([]),
+  /** Other checkouts that are snapshotted next to this one; each lands in a sibling folder of this tree. */
+  links: z
+    .array(z.string().regex(SAFE_SEGMENT, { message: `a link name must match ${SAFE_SEGMENT.source}` }))
+    .default([])
+    .refine((links) => new Set(links).size === links.length, { message: 'a link name is listed twice' }),
 });
 
 /** `command` is accepted as an alias for `cmd` so the documented examples parse. */
@@ -33,12 +39,21 @@ const profileSchema = z.preprocess((value) => {
   return value;
 }, profileObject);
 
-const configSchema = z.object({
-  project: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/),
-  sshHost: z.string().min(1).optional(),
-  ignore: z.array(z.string()).default(DEFAULT_IGNORE),
-  profiles: z.record(profileSchema).default({}),
-});
+const configSchema = z
+  .object({
+    project: z.string().regex(SAFE_SEGMENT),
+    sshHost: z.string().min(1).optional(),
+    ignore: z.array(z.string()).default(DEFAULT_IGNORE),
+    profiles: z.record(profileSchema).default({}),
+  })
+  .superRefine((config, ctx) => {
+    // With links, the main tree is the folder <project> in the snapshot: a link of that name would overwrite it.
+    for (const [name, profile] of Object.entries(config.profiles)) {
+      if (profile.links.includes(config.project)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `profile ${name}: a link cannot have the project name ${config.project}` });
+      }
+    }
+  });
 
 /** testbox.yml is missing or invalid. The CLI exits 2 for it, not 1. */
 export class ConfigError extends Error {

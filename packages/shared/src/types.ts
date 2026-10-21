@@ -42,6 +42,8 @@ export interface SnapshotRecord {
   ownerId: string;
   relPath: string;
   digest: string;
+  /** The folder of the main tree in the snapshot (the job cwd). Set only when the snapshot has links. */
+  workDir?: string;
   createdAt: number;
 }
 
@@ -51,6 +53,8 @@ export interface JobRecord {
   snapshotId: string;
   snapshotRelPath: string;
   snapshotDigest: string;
+  /** The job cwd inside the snapshot; null when the snapshot root is the cwd (no links). */
+  snapshotWorkDir: string | null;
   ownerId: string;
   command: string;
   profile: string | null;

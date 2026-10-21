@@ -9,10 +9,10 @@ Run `testbox <command> --help` for every option.
 | Command | What it does |
 | --- | --- |
 | `setup --api-url URL --token TOKEN` | Installs Mutagen if missing, logs in, makes an SSH key if there is none, then runs `doctor`. |
-| `doctor` | Checks the API, the token, Mutagen, stale syncs, each worker, and the profiles in `testbox.yml`. Prints a fix for each problem. A stale sync has a deleted checkout, or no `.testbox/workspace.json` names it. Two checkouts that sync to the same worker folder also fail. |
+| `doctor` | Checks the API, the token, Mutagen, stale syncs, each worker, and the profiles in `testbox.yml`, with one check per link of a profile (`link api of ios-unit: <path>`). Prints a fix for each problem. A stale sync has a deleted checkout, or no `.testbox/workspace.json` names it. Two checkouts that sync to the same worker folder also fail. |
 | `init [--force]` | Writes a starting `testbox.yml` for the repo. |
 | `login --api-url URL --token TOKEN [--ssh-host HOST]` | Stores the API URL and token in `~/.config/testbox/config.json` (mode 0600). |
-| `profiles` | Lists the profiles of `testbox.yml` (name, labels, command) and where the file is. With `--json`, one `profiles` event and a summary. |
+| `profiles` | Lists the profiles of `testbox.yml` (name, labels, command, links) and where the file is. With `--json`, one `profiles` event and a summary. |
 | `start` | Creates the workspace and starts the Mutagen sync. You can run it again: it reuses the workspace and its live sessions. `verify` and `run` do this themselves when the checkout has no workspace yet, so `start` is optional. |
 | `verify <profile>` | Flush, snapshot, queue, and stream the profile's command. The log is also written to `.testbox/logs/<job-id>.log`. |
 | `run "<command>" [--profile NAME]` | The same, for any command. |
@@ -21,7 +21,7 @@ Run `testbox <command> --help` for every option.
 | `stop` | Stops the sync and deletes the workspace. |
 | `prune [--dry-run]` | Terminates the stale syncs on this machine. Live syncs stay. It does not use the API. With `--dry-run`, it only prints them. |
 
-Flags for `verify` and `run`: `--detach` (submit and return the job id), `--timeout <seconds>` (default 1800), `--priority <n>`, `--workspace <id>`, `--direct` (see [Without a control plane](#without-a-control-plane)), `--ssh-host <host>`, `--quiet` (do not print the log; the file is still written), `--json` (see [Output with --json](#output-with---json)). `start` takes the same flags. Ctrl-C on a terminal asks whether to cancel or detach; without a terminal it cancels.
+Flags for `verify` and `run`: `--detach` (submit and return the job id), `--timeout <seconds>` (default 1800), `--priority <n>`, `--workspace <id>`, `--direct` (see [Without a control plane](#without-a-control-plane)), `--ssh-host <host>`, `--quiet` (do not print the log; the file is still written), `--link <name>=<path>` (where the checkout of a link is; repeatable; a relative path is relative to the current directory; with `verify` the profile must have that link, with `run` it adds the link), `--json` (see [Output with --json](#output-with---json)). `start` takes the same flags, except `--link`. Ctrl-C on a terminal asks whether to cancel or detach; without a terminal it cancels.
 
 ### Admin
 
@@ -39,7 +39,7 @@ Flags for `verify` and `run`: `--detach` (submit and return the job id), `--time
 | --- | --- |
 | 0 | job passed |
 | 1 | job failed, or another error at run time (for example a failed `doctor` check) |
-| 2 | bad call: unknown profile, missing or invalid `testbox.yml`, unknown flag or missing argument, bad `--timeout` |
+| 2 | bad call: unknown profile, missing or invalid `testbox.yml`, unknown flag or missing argument, bad `--timeout`, a link with no checkout or no `testbox.yml`, a `--link` the profile does not have, `--direct` with links |
 | 10 | sync error (Mutagen) |
 | 11 | no compatible worker: no worker has the labels, none with the labels sends heartbeats, SSH to the worker fails, or the API answers 503 |
 | 12 | timeout, or the worker stopped during the job (its lease expired) |
@@ -53,11 +53,11 @@ Every command accepts `--json`. It writes NDJSON to stdout, one event per line, 
 | Event | Fields | When |
 | --- | --- | --- |
 | `info`, `error` | `line` | A note, or an error that is not the end (for example a Mutagen resume that failed). |
-| `source` | `path`, `branch`, `commit`, `dirty` | Which checkout `verify` or `run` snapshotted. `branch`, `commit`, and `dirty` are missing when git fails. |
+| `source` | `path`, `branch`, `commit`, `dirty`, `links[]` (`name`, `path`, `branch`, `commit`, `dirty`) | Which checkout `verify` or `run` snapshotted, and each linked checkout. `branch`, `commit`, and `dirty` are missing when git fails. `links` is missing when the job has no links. |
 | `status` | `state`, `jobId` | Each state change: `queued`, `assigned`, `running`. |
 | `log` | `stream` (`stdout` or `stderr`), `line` | One line of the job log. Not printed with `--quiet`. |
 | `check` | `ok`, `label`, `fix` | One `doctor` check. |
-| `profiles` | `file`, `project`, `profiles[]` (`name`, `command`, `requires`, `artifacts`) | The `profiles` command. |
+| `profiles` | `file`, `project`, `profiles[]` (`name`, `command`, `requires`, `artifacts`, `links`) | The `profiles` command. |
 | `prune` | `name`, `root`, `reason`, `dryRun`, `ok`, `error` | One sync the `prune` command terminated (or would). |
 | `user` | `name`, `apiUrl`, `token` | `admin add-user`. |
 | `summary` | `exit`, `hint`, `exitCode`, `state`, `jobId`, `error`, `logFile`, and per command: `ok`, `source` (`status`), `failed` (`doctor`, `prune`), `count` and `dryRun` (`prune`), `file` and `profiles` (`init`) | The last line. |
@@ -78,9 +78,21 @@ profiles:
     requires: [linux]           # worker labels; all must match
     artifacts:                  # globs to upload; get them with `testbox artifacts`
       - coverage/**
+  ios-unit:
+    command: cd ios && xcodebuild test -scheme App
+    requires: [macos, xcode]
+    links: [api]                # other checkouts; each lands next to this tree on the worker
 ```
 
-The CLI finds `testbox.yml` in the current directory or a parent. It ignores unknown keys. The default `ignore` list is `node_modules`, `.next`, `.git`, `.env`, `.env.*`, `dist`, `build`, `coverage`, `DerivedData`, `.turbo`, `.testbox`.
+The CLI finds `testbox.yml` in the current directory or a parent. It ignores unknown keys.
+
+`links` names other checkouts that the job sees as sibling folders, uncommitted changes included. Use it when the build reads a path outside the repo, for example a local Swift package at `../api/client/swift-client`. A link name has the same rules as `project`, and it cannot be the project name. For link `api`, the CLI looks for the checkout in this order:
+
+1. `--link api=<path>`.
+2. When this checkout's folder is `<project>_<suffix>` (for example `interface_TGN-821`), the sibling `../api_TGN-821`.
+3. The sibling `../api`.
+
+When none exists, the job exits 2: `link api: no checkout at ../api_TGN-821 or ../api; pass --link api=<path>`. The linked checkout needs its own `testbox.yml`. Its `ignore` list applies to its sync and its snapshot copy. Its `project` names only its own workspace. Links need the control plane: `--direct` with links exits 2. The default `ignore` list is `node_modules`, `.next`, `.git`, `.env`, `.env.*`, `dist`, `build`, `coverage`, `DerivedData`, `.turbo`, `.testbox`.
 
 Testbox does not reset or erase simulators. Other jobs, CI runners, or people can use the same Mac. A job that needs a clean simulator makes its own (`xcrun simctl create`) and deletes it at the end.
 
@@ -122,6 +134,8 @@ Job states: `queued → assigned → running → succeeded | failed | cancelled 
 Each checkout of a repo gets its own workspace and its own folder on the worker: `~/testbox/workspaces/<user>/<project>/<workspace id>`. So a main checkout and a git worktree of one repo do not sync into the same folder. With `--direct`, the folder is `~/testbox/workspaces/local/<project>/<id>`, and the id is a short hash of the checkout directory.
 
 `start` writes the workspace to `.testbox/workspace.json`. `verify` and `run` call the same code when that file is missing (or belongs to another checkout), so the first `verify` in a checkout also starts it. You can run `start` again safely. When the API still has the workspace, `start` reuses it and keeps the Mutagen sessions that are alive. It makes a session only when one is missing. When the API does not have the workspace, `start` stops the old sessions and makes a new workspace. With `--direct`, `start` stops the old session and makes it again.
+
+With links, each linked checkout gets its own workspace and Mutagen session (and its own `.testbox/workspace.json`), on the worker that runs the job. `verify` flushes and pauses every session, takes one snapshot, and resumes every session, also when the snapshot fails. The snapshot then has one folder per tree: `snapshots/<id>/<project>` holds this checkout and is the job's working directory, and `snapshots/<id>/<link name>` holds each link. So `../api` in the job is the linked checkout. The digest covers all of `snapshots/<id>`. Without links, the layout does not change: `snapshots/<id>` is the tree and the working directory.
 
 Workspaces from before this layout use `~/testbox/workspaces/<user>/<project>`. When `start` finds such a workspace, it stops its sessions, deletes it, and makes a new one in the new layout. `start` also warns when another checkout on your machine still syncs into the same worker folder. The old folders stay on the worker until you remove them.
 

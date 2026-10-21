@@ -71,6 +71,14 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
       .option('--quiet', 'do not print the job log; it is still written to .testbox/logs/<job-id>.log')
       .option('--ssh-host <host>', 'ssh config host');
 
+  /** `--link <name>=<path>` on verify and run: where a linked checkout is. Repeatable. */
+  const linkFlag = (command: Command) =>
+    command.option(
+      '--link <name=path>',
+      'the checkout of a link (repeatable; a relative path is relative to the current directory)',
+      (value: string, previous: string[] = []) => [...previous, value],
+    );
+
   program
     .command('login')
     .description('store the API URL and token (testbox setup does this for you)')
@@ -129,18 +137,18 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
       code = await app.profiles();
     });
 
-  common(
+  linkFlag(common(
     program
       .command('run')
       .description('run a command on a worker')
       .argument('<command>', 'command to run')
       .option('--profile <name>', 'profile name (latest wins among queued jobs of one profile)'),
-  )
+  ))
     .action(async (command: string, opts) => {
       code = await app.run(command, opts);
     });
 
-  common(program.command('verify').description('run a profile from testbox.yml on a worker').argument('<profile>', 'profile from testbox.yml'))
+  linkFlag(common(program.command('verify').description('run a profile from testbox.yml on a worker').argument('<profile>', 'profile from testbox.yml')))
     .action(async (profile: string, opts) => {
     code = await app.verify(profile, opts);
   });

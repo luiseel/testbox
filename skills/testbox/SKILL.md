@@ -23,7 +23,7 @@ testbox run "<command>" --json --quiet    # any command, same flow
 - Always pass `--json`. It prints NDJSON events and ends with one `summary` line, in one ordered stream. Without it, stdout and stderr can arrive out of order through a pipe.
 - Prefer `--quiet` for test suites. The log is not printed; it is written to `.testbox/logs/<job-id>.log` (the `logFile` field of the summary). Read the end of that file when the job fails: `tail -n 100 <logFile>`, or grep it for `FAIL`, `error`, or the test name. Without `--quiet`, every log line is also an event, and the file is still written.
 - The summary line has `state`, `exitCode` (the command's own status), `exit` (the CLI's exit code, see the table), `logFile`, and for a non-zero `exit` a `hint` that says what to do. Read `exit` from the summary or `$?`; both are the same.
-- The `source` event shows which checkout the job tested: `path`, `branch`, `commit`, `dirty`. Make sure it is the checkout you changed.
+- The `source` event shows which checkout the job tested: `path`, `branch`, `commit`, `dirty`, and `links` (the same for each linked checkout). Make sure it is the checkout you changed.
 - The default timeout is 1800 s. Set the Bash tool timeout to match, or use `--timeout <seconds>`. For long jobs, use `--detach` (the summary has the job id), then `testbox logs <job-id> --follow` or `testbox status <job-id>`.
 - Never run two `verify` calls for the same profile at once: a newer queued job cancels the older queued one (exit 13).
 - Artifacts: `testbox artifacts <job-id>` downloads them into `./.testbox/<job-id>/`.
@@ -35,7 +35,7 @@ testbox run "<command>" --json --quiet    # any command, same flow
 | --- | --- | --- |
 | 0 | job passed | done |
 | 1 | job failed | a real build or test failure: read the log and fix the code |
-| 2 | bad call: unknown profile, missing or invalid `testbox.yml`, bad flag | fix the command line or `testbox.yml`, not the code |
+| 2 | bad call: unknown profile, missing or invalid `testbox.yml`, bad flag, a link with no checkout | fix the command line or `testbox.yml`, not the code |
 | 10 | sync error (Mutagen) | infrastructure: run `testbox doctor` |
 | 11 | no usable worker: none has all labels in `requires`, none with them is up, or SSH to it fails | run `testbox doctor`; if the labels are wrong, fix `requires` |
 | 12 | timeout, or the worker stopped during the job (`lease_expired`) | raise `--timeout` or find the hang; for `lease_expired`, run `testbox doctor` |
@@ -60,6 +60,7 @@ profiles:
   ios:
     command: xcodebuild test -scheme App -destination 'platform=iOS Simulator,name=iPhone 16'
     requires: [macos, xcode]
+    links: [api]                # the sibling checkout ../api, uncommitted changes too
 ```
 
 Labels a worker finds itself: `macos` / `linux`, `arm64` / `x64`, `node`, `pnpm`, `mise`, `browser`, `xcode`, `xcode-<version>`, `ios-simulator`, `worker:<id>`. Use labels; never name a host.
@@ -70,6 +71,7 @@ Rules for good profiles:
 - With `package.json` and `pnpm-lock.yaml`, the worker installs `node_modules` itself (cached by lockfile). Do not put `pnpm install` in the command.
 - Testbox does not reset simulators, and other users can share the Mac. For a clean simulator, make one in the command (`xcrun simctl create`), use its UDID as the destination, and delete it in a `trap ... EXIT`.
 - Swift on a Mac worker: use `swift test --build-system native`; the default build system hangs there.
+- The build reads a path outside the repo (for example `../api/client/swift-client`)? Add `links: [api]`. The job then runs in a folder with `../api` next to it. The CLI finds `../api_<suffix>` (when this checkout is `<project>_<suffix>`) or `../api`; else pass `--link api=<path>`. The linked checkout needs its own `testbox.yml`. A missing one exits 2.
 - `testbox init` adds `.testbox/` to `.gitignore`. Keep it there: it holds the workspace state and the job logs.
 
 ## More

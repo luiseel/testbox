@@ -6,6 +6,7 @@ import { Output } from './output';
 import { CliApiError, HttpApi } from './api-client';
 import { exitCodeForFailure, TestboxApp, type CliIO } from './commands';
 import { readUserConfig, type UserConfig } from './config-store';
+import { resolveLink } from './links';
 import { MutagenSsh } from './remote';
 import { classifySessions, loadRootState, staleReason } from './sessions';
 
@@ -251,24 +252,49 @@ export class DeveloperApp {
   }
 
   private async checkProfiles(workers: Worker[]): Promise<Check[]> {
-    let config;
+    let loaded;
     try {
-      config = (await loadRepoConfig(this.io.cwd)).config;
+      loaded = await loadRepoConfig(this.io.cwd);
     } catch {
       return [];
     }
-    return Object.entries(config.profiles).map(([name, profile]) => {
+    const { config } = loaded;
+    const configDir = path.dirname(loaded.file);
+    const checks: Check[] = [];
+    for (const [name, profile] of Object.entries(config.profiles)) {
       const fits = workers.filter((worker) => profile.requires.every((label) => worker.labels.includes(label)));
       const requires = profile.requires.length ? ` (requires ${profile.requires.join(', ')})` : '';
-      if (fits.some((worker) => worker.healthy)) return { ok: true, label: `profile ${name}${requires}` };
+      if (fits.some((worker) => worker.healthy)) {
+        checks.push({ ok: true, label: `profile ${name}${requires}` });
+      } else {
+        checks.push({
+          ok: false,
+          label: `profile ${name}${requires}`,
+          fix: fits.length
+            ? `only ${fits.map((worker) => worker.id).join(', ')} can run it, and it is down`
+            : 'no worker has these labels; change requires, or an admin adds a worker with --labels',
+        });
+      }
+      for (const link of profile.links) checks.push(await this.checkLink(configDir, config.project, name, link));
+    }
+    return checks;
+  }
+
+  /** One check per link of a profile: the CLI finds its checkout, and the checkout has a testbox.yml. */
+  private async checkLink(configDir: string, project: string, profile: string, link: string): Promise<Check> {
+    try {
+      const found = await resolveLink(configDir, project, link, new Map());
+      return { ok: true, label: `link ${link} of ${profile}: ${found.dir}` };
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
       return {
         ok: false,
-        label: `profile ${name}${requires}`,
-        fix: fits.length
-          ? `only ${fits.map((worker) => worker.id).join(', ')} can run it, and it is down`
-          : 'no worker has these labels; change requires, or an admin adds a worker with --labels',
+        label: `link ${link} of ${profile}: ${reason.replace(/^link [^:]+: /, '').replace(/; pass --link .*$/, '')}`,
+        fix: reason.includes('has no testbox.yml')
+          ? 'run testbox init in that checkout'
+          : `pass --link ${link}=<path>, or clone it next to this checkout`,
       };
-    });
+    }
   }
 
   private async checkSyncs(): Promise<Check[]> {
