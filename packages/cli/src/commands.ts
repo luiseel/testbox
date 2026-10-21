@@ -717,8 +717,9 @@ export class TestboxApp {
   ): Promise<number> {
     let terminal: { state: string; exitCode: number | null; error: string | null } | null = null;
     let detached = false;
+    // One abort for the stream and for the final state request: a detach stops either at once.
     const controller = new AbortController();
-    // The handlers come first, before any await: a signal must never find no handler.
+    // The handlers come first, before any await, and stay until the summary is written.
     const dispose = attachInterrupt({
       signals: this.io.signals,
       isTTY: this.io.isTTY,
@@ -731,53 +732,55 @@ export class TestboxApp {
         controller.abort();
       },
     });
-    submitWatch?.dispose();
-    if (submitWatch?.requested()) {
-      // The signal came during the submit: the job is queued; do not follow it.
-      dispose();
-      output.summary(detachedSummary(jobId));
-      return ExitCode.Pass;
-    }
-    await log?.open();
     try {
-      await api.stream(
-        jobId,
-        (event, data) => {
-          const parsed = JSON.parse(data) as {
-            stream?: 'stdout' | 'stderr';
-            line?: string;
-            state?: string;
-            exitCode?: number | null;
-            error?: string | null;
-          };
-          if (event === 'log' && parsed.stream && parsed.line !== undefined) {
-            output.line(parsed.stream, parsed.line);
-            log?.write(parsed.line);
-          }
-          if (event === 'state' && parsed.state) {
-            output.event({ type: 'status', state: parsed.state, jobId });
-          }
-          if (event === 'done' && parsed.state) {
-            terminal = {
-              state: parsed.state,
-              exitCode: parsed.exitCode ?? null,
-              error: parsed.error ?? null,
+      submitWatch?.dispose();
+      if (submitWatch?.requested()) {
+        // The signal came during the submit: the job is queued; do not follow it.
+        output.summary(detachedSummary(jobId));
+        return ExitCode.Pass;
+      }
+      await log?.open();
+      try {
+        await api.stream(
+          jobId,
+          (event, data) => {
+            const parsed = JSON.parse(data) as {
+              stream?: 'stdout' | 'stderr';
+              line?: string;
+              state?: string;
+              exitCode?: number | null;
+              error?: string | null;
             };
-          }
-        },
-        controller.signal,
-      );
-    } catch (err) {
-      if (!detached && !(err instanceof Error && err.name === 'AbortError')) throw err;
-    }
-    // The handlers stay until the summary is written: a signal while the log closes or the
-    // final state is fetched still ends in the detached summary.
-    try {
+            if (event === 'log' && parsed.stream && parsed.line !== undefined) {
+              output.line(parsed.stream, parsed.line);
+              log?.write(parsed.line);
+            }
+            if (event === 'state' && parsed.state) {
+              output.event({ type: 'status', state: parsed.state, jobId });
+            }
+            if (event === 'done' && parsed.state) {
+              terminal = {
+                state: parsed.state,
+                exitCode: parsed.exitCode ?? null,
+                error: parsed.error ?? null,
+              };
+            }
+          },
+          controller.signal,
+        );
+      } catch (err) {
+        if (!detached && !isAbort(err)) throw err;
+      }
       await log?.close();
       if (log?.error) output.info(log.error);
       if (!terminal && !detached) {
-        const job = await api.getJob(jobId);
-        terminal = { state: job.job.state, exitCode: job.job.exitCode, error: job.job.error };
+        // The stream ended without a final state: ask for it. A detach stops this request too.
+        try {
+          const job = await api.getJob(jobId, controller.signal);
+          terminal = { state: job.job.state, exitCode: job.job.exitCode, error: job.job.error };
+        } catch (err) {
+          if (!detached && !isAbort(err)) throw err;
+        }
       }
       if (detached || !terminal) {
         output.summary(detachedSummary(jobId, log?.path));
@@ -794,7 +797,9 @@ export class TestboxApp {
       });
       return exit;
     } finally {
+      // On every exit, also an error of the stream: no handler stays, and the log file is closed.
       dispose();
+      await log?.close();
     }
   }
 
@@ -971,6 +976,10 @@ function otherRootsSyncingTo(sessions: MutagenSessionInfo[], stagingRel: string,
     if (session.betaUrl.endsWith(`/${stagingRel}`)) roots.add(session.alphaPath);
   }
   return [...roots];
+}
+
+function isAbort(err: unknown): boolean {
+  return err instanceof Error && err.name === 'AbortError';
 }
 
 /** The summary when the CLI stops following a job that still runs: say how to find it again. */
