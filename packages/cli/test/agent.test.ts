@@ -202,7 +202,7 @@ describe('agent-facing cli', () => {
       const sub = path.join(project, 'packages', 'app');
       await mkdir(sub, { recursive: true });
       expect(await runCli(['profiles'], io(home, sub, quietRemote, stdout, stderr))).toBe(0);
-      expect(stdout.join('')).toBe('unit: pnpm test\nios [macos, xcode]: xcodebuild test\n');
+      expect(stdout.join('')).toBe('unit: pnpm test\nios [macos, xcode] +api: xcodebuild test\n');
       expect(stderr.join('')).toContain(path.join(project, 'testbox.yml'));
 
       stdout.length = 0;
@@ -289,6 +289,30 @@ describe('agent-facing cli: detach and run --profile', () => {
         expect(seen.some((request) => request.endsWith('/cancel'))).toBe(false);
         expect(cli.signals.listenerCount(signal)).toBe(0);
       }
+    } finally {
+      await rm(home, { recursive: true, force: true });
+      await rm(project, { recursive: true, force: true });
+    }
+  });
+
+  it('still detaches on SIGTERM after a Ctrl-C without a TTY sent the cancel', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
+    const project = await mkdtemp(path.join(os.tmpdir(), 'tb-proj-'));
+    const stdout: string[] = [];
+    const seen: string[] = [];
+    try {
+      await loggedIn(home);
+      await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
+      const cli = io(home, project, quietRemote, stdout, []);
+      cli.fetchImpl = openStreamApi(seen, () => {
+        cli.signals.emit('SIGINT');
+        setTimeout(() => cli.signals.emit('SIGTERM'), 20);
+      });
+      expect(await runCli(['verify', 'unit', '--json', '--quiet'], cli)).toBe(0);
+      expect(jsonLines(stdout).at(-1)).toMatchObject({ type: 'summary', jobId: 'job_9', state: 'detached', exit: 0 });
+      expect(seen).toContain('POST /v1/jobs/job_9/cancel');
+      expect(cli.signals.listenerCount('SIGTERM')).toBe(0);
+      expect(cli.signals.listenerCount('SIGINT')).toBe(0);
     } finally {
       await rm(home, { recursive: true, force: true });
       await rm(project, { recursive: true, force: true });
@@ -651,6 +675,39 @@ describe('agent-facing cli: links', () => {
       await bad(['run', 'make', '--link', 'interface=../api'], '--link interface: a link cannot have the project name interface');
       const many = Array.from({ length: 21 }, (_, i) => ['--link', `l${i}=../api`]).flat();
       await bad(['run', 'make', ...many], '--link: at most 20 links');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('puts the first session of a new link on the worker chosen for the job, not on one it selects itself', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
+    const { root, main } = await linkedCheckouts({ api: 'project: api\n' });
+    const stdout: string[] = [];
+    const calls: { file: string; args: string[] }[] = [];
+    const seen: { call: string; body: unknown }[] = [];
+    // The main checkout selects mac-1 twice (start, then the job). Any later selection would name mac-2.
+    let selections = 0;
+    const base = linkApi(seen);
+    const api = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).includes('/workers/select')) {
+        selections += 1;
+        const worker = selections <= 2 ? { id: 'mac-1', sshHost: 'dev@10.0.0.5' } : { id: 'mac-2', sshHost: 'dev@10.0.0.6' };
+        seen.push({ call: 'POST /v1/workers/select', body: undefined });
+        return new Response(JSON.stringify({ worker: { ...worker, labels: ['macos'] } }), { status: 200 });
+      }
+      return base(input, init);
+    }) as typeof fetch;
+    try {
+      await loggedIn(home);
+      expect(await runCli(['verify', 'ios', '--json'], io(home, main, recordingRemote(calls), stdout, [], api))).toBe(0);
+      expect(selections).toBe(2);
+      const linkState = JSON.parse(await readFile(path.join(root, 'api', '.testbox', 'workspace.json'), 'utf8')) as { sshHost: string; workerId: string };
+      expect(linkState).toMatchObject({ sshHost: 'dev@10.0.0.5', workerId: 'mac-1' });
+      const creates = calls.filter((entry) => entry.file === 'mutagen' && entry.args[1] === 'create').map((entry) => entry.args.join(' '));
+      expect(creates).toHaveLength(2);
+      for (const create of creates) expect(create).toContain('dev@10.0.0.5:');
     } finally {
       await rm(home, { recursive: true, force: true });
       await rm(root, { recursive: true, force: true });

@@ -33,6 +33,7 @@ import {
   type WorkspaceState,
 } from './config-store';
 import { attachInterrupt } from './interrupt';
+import { withSnapshotLocks } from './lock';
 import { Output, type Summary, type TextSink } from './output';
 import { mutagenDestination, MutagenSsh, RemoteUnavailable, SyncError, type RemoteRunner } from './remote';
 import { LinkError, parseLinkFlags, resolveLinks } from './links';
@@ -186,7 +187,8 @@ export class TestboxApp {
       if (profiles.length === 0) this.io.stdout.write('no profiles\n');
       for (const profile of profiles) {
         const requires = profile.requires.length ? ` [${profile.requires.join(', ')}]` : '';
-        this.io.stdout.write(`${profile.name}${requires}: ${profile.command}\n`);
+        const links = profile.links.map((link) => ` +${link}`).join('');
+        this.io.stdout.write(`${profile.name}${requires}${links}: ${profile.command}\n`);
       }
       return ExitCode.Pass;
     } catch (err) {
@@ -221,6 +223,7 @@ export class TestboxApp {
     flags: CommonFlags,
     output: Output,
     requires: string[],
+    worker?: { id: string; sshHost: string } | null,
   ): Promise<{ state: WorkspaceState; reused: boolean }> {
     const direct = flags.direct === true;
     const configDir = path.dirname(loaded.file);
@@ -263,7 +266,8 @@ export class TestboxApp {
         stagingRel = created.stagingRel;
       }
       // The first session goes to the worker that will run the job, so one SSH host is probed, not two.
-      const selected = await api.selectWorker({ requires, workspaceId: id });
+      // A link takes the worker of the main checkout; its own selection could name another one.
+      const selected = worker ?? (await api.selectWorker({ requires, workspaceId: id }));
       if (selected?.sshHost) {
         sshHost = selected.sshHost;
         workerId = selected.id;
@@ -481,7 +485,7 @@ export class TestboxApp {
       const trees: SyncedTree[] = [{ name: loaded.config.project, dir: configDir, ignore: loaded.config.ignore, state }];
       for (const link of links) {
         // --workspace names the workspace of the main checkout, not of a link.
-        let linkState = await this.resolveState(link.loaded, { ...flags, workspace: undefined }, user, output, requires);
+        let linkState = await this.resolveState(link.loaded, { ...flags, workspace: undefined }, user, output, requires, worker);
         if (worker) {
           linkState = await this.ensureWorkerSession(linkState, worker, link.dir, link.loaded.config.ignore, user?.identityFile);
         } else if (linkState.sshHost !== state.sshHost) {
@@ -541,9 +545,21 @@ export class TestboxApp {
     output: Output,
   ): Promise<{ digest: string; relPath: string; workDir?: string }> {
     const [main, ...links] = trees;
+    // Another run on this machine may share a tree (a link of both): hold each tree while its sync is paused.
+    return withSnapshotLocks(trees.map((tree) => tree.dir), () => this.pauseAndSnapshot(ssh, user, main, links, snapshotId, output));
+  }
+
+  private async pauseAndSnapshot(
+    ssh: MutagenSsh,
+    user: UserConfig,
+    main: SyncedTree,
+    links: SyncedTree[],
+    snapshotId: string,
+    output: Output,
+  ): Promise<{ digest: string; relPath: string; workDir?: string }> {
     const paused: SyncedTree[] = [];
     try {
-      for (const tree of trees) {
+      for (const tree of [main, ...links]) {
         await ssh.pause(tree.state.sessionName);
         paused.push(tree);
       }
@@ -785,6 +801,7 @@ export class TestboxApp {
     user: UserConfig | null,
     output: Output,
     requires: string[],
+    worker?: { id: string; sshHost: string } | null,
   ): Promise<WorkspaceState> {
     const config = loaded.config;
     const dir = path.dirname(loaded.file);
@@ -805,7 +822,7 @@ export class TestboxApp {
     }
     if (!state) {
       output.info('no workspace for this checkout yet; starting one');
-      const started = await this.createWorkspace(loaded, user, flags, output, requires);
+      const started = await this.createWorkspace(loaded, user, flags, output, requires, worker);
       if (!this.json) output.info(`started workspace ${started.state.id}`);
       return started.state;
     }

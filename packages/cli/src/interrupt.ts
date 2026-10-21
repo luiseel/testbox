@@ -14,6 +14,7 @@ const DETACH_SIGNALS = ['SIGTERM', 'SIGHUP'] as const;
  * First Ctrl-C on a TTY asks cancel vs detach. A second Ctrl-C, or any Ctrl-C without a TTY, cancels.
  * SIGTERM and SIGHUP detach: a harness that kills the CLI on a time limit must not cancel the job.
  * The first SIGTERM or SIGHUP removes their handlers, so a second one ends the process at once.
+ * SIGTERM after a Ctrl-C still detaches: the cancel is sent, and the CLI stops following.
  */
 export function attachInterrupt(opts: InterruptOptions): () => void {
   let decided = false;
@@ -36,9 +37,12 @@ export function attachInterrupt(opts: InterruptOptions): () => void {
   const offDetach = () => {
     for (const name of DETACH_SIGNALS) opts.signals.off(name, onDetach);
   };
+  let detached = false;
   const onDetach = () => {
     offDetach();
-    if (decided) return;
+    if (detached) return;
+    // Also after a cancel started: stop following; the cancel request is already sent.
+    detached = true;
     decided = true;
     opts.detach();
   };
