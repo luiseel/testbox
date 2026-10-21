@@ -53,7 +53,7 @@ It does these steps:
 
 Options: `--id <id>` (default `<short hostname>-1`, lower case), `--labels gpu,big-disk` (extra labels), `--capacity <n>` (jobs at the same time, default 1), `--address`, `--ref`, `--git-url`, `--repo-dir`, `--data-dir`, `--wait <seconds>` (for the first heartbeat, default 600), `--no-smoke`. When you are not logged in to this control plane, it skips the test job.
 
-The worker finds its own labels: the OS (`macos` or `linux`), the arch, `node`, `pnpm`, `mise`, `browser`, `worker:<id>`, and on a Mac `xcode`, `xcode-<version>`, and `ios-simulator` (see [Labels](reference.md#labels)).
+The worker finds its own labels: the OS (`macos` or `linux`), the arch, `node`, `pnpm`, `mise`, `xcodegen`, `docker`, `browser`, `worker:<id>`, and on a Mac `xcode`, `xcode-<version>`, and `ios-simulator` (see [Labels](reference.md#labels)).
 
 ### macOS workers
 

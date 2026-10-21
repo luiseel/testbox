@@ -8,7 +8,13 @@ export interface InterruptOptions {
   detach: () => void;
 }
 
-/** First Ctrl-C on a TTY asks cancel vs detach. A second Ctrl-C, or any Ctrl-C without a TTY, cancels. */
+const DETACH_SIGNALS = ['SIGTERM', 'SIGHUP'] as const;
+
+/**
+ * First Ctrl-C on a TTY asks cancel vs detach. A second Ctrl-C, or any Ctrl-C without a TTY, cancels.
+ * SIGTERM and SIGHUP detach: a harness that kills the CLI on a time limit must not cancel the job.
+ * The first SIGTERM or SIGHUP removes their handlers, so a second one ends the process at once.
+ */
 export function attachInterrupt(opts: InterruptOptions): () => void {
   let decided = false;
   let prompting = false;
@@ -27,8 +33,19 @@ export function attachInterrupt(opts: InterruptOptions): () => void {
       else opts.cancel();
     });
   };
+  const offDetach = () => {
+    for (const name of DETACH_SIGNALS) opts.signals.off(name, onDetach);
+  };
+  const onDetach = () => {
+    offDetach();
+    if (decided) return;
+    decided = true;
+    opts.detach();
+  };
   opts.signals.on('SIGINT', onSig);
+  for (const name of DETACH_SIGNALS) opts.signals.on(name, onDetach);
   return () => {
     opts.signals.off('SIGINT', onSig);
+    offDetach();
   };
 }

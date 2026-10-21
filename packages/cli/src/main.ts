@@ -134,7 +134,10 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
       .command('run')
       .description('run a command on a worker')
       .argument('<command>', 'command to run')
-      .option('--profile <name>', 'profile name (latest wins among queued jobs of one profile)'),
+      .option(
+        '--profile <name>',
+        "use the requires and artifacts of this profile; the job replaces a queued job of the same profile in this workspace",
+      ),
   )
     .action(async (command: string, opts) => {
       code = await app.run(command, opts);

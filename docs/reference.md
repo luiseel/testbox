@@ -15,13 +15,13 @@ Run `testbox <command> --help` for every option.
 | `profiles` | Lists the profiles of `testbox.yml` (name, labels, command) and where the file is. With `--json`, one `profiles` event and a summary. |
 | `start` | Creates the workspace and starts the Mutagen sync. You can run it again: it reuses the workspace and its live sessions. `verify` and `run` do this themselves when the checkout has no workspace yet, so `start` is optional. |
 | `verify <profile>` | Flush, snapshot, queue, and stream the profile's command. The log is also written to `.testbox/logs/<job-id>.log`. |
-| `run "<command>" [--profile NAME]` | The same, for any command. |
+| `run "<command>" [--profile NAME]` | The same, for any command. With `--profile`, the job also gets that profile's `requires` and `artifacts`, so it runs on the same kind of worker (for example one test of an iOS profile). An unknown profile exits 2. The command does not change: write the setup the profile needs into it. The job counts as a job of that profile, so it replaces a queued `verify NAME` of the same workspace (see [Scheduling](#scheduling)). |
 | `status <job-id>`, `logs <job-id> [--follow]`, `cancel <job-id>` | One job. |
 | `artifacts <job-id>` | Downloads the job's artifacts into `./.testbox/<job-id>/`. |
 | `stop` | Stops the sync and deletes the workspace. |
 | `prune [--dry-run]` | Terminates the stale syncs on this machine. Live syncs stay. It does not use the API. With `--dry-run`, it only prints them. |
 
-Flags for `verify` and `run`: `--detach` (submit and return the job id), `--timeout <seconds>` (default 1800), `--priority <n>`, `--workspace <id>`, `--direct` (see [Without a control plane](#without-a-control-plane)), `--ssh-host <host>`, `--quiet` (do not print the log; the file is still written), `--json` (see [Output with --json](#output-with---json)). `start` takes the same flags. Ctrl-C on a terminal asks whether to cancel or detach; without a terminal it cancels.
+Flags for `verify` and `run`: `--detach` (submit and return the job id), `--timeout <seconds>` (default 1800), `--priority <n>`, `--workspace <id>`, `--direct` (see [Without a control plane](#without-a-control-plane)), `--ssh-host <host>`, `--quiet` (do not print the log; the file is still written), `--json` (see [Output with --json](#output-with---json)). `start` takes the same flags. Ctrl-C on a terminal asks whether to cancel or detach; without a terminal it cancels. SIGTERM and SIGHUP detach: the job continues on the worker, and the CLI prints the `detached` summary and exits 0. This is for a tool that kills the CLI at a time limit. A second SIGTERM ends the CLI at once.
 
 ### Admin
 
@@ -60,9 +60,9 @@ Every command accepts `--json`. It writes NDJSON to stdout, one event per line, 
 | `profiles` | `file`, `project`, `profiles[]` (`name`, `command`, `requires`, `artifacts`) | The `profiles` command. |
 | `prune` | `name`, `root`, `reason`, `dryRun`, `ok`, `error` | One sync the `prune` command terminated (or would). |
 | `user` | `name`, `apiUrl`, `token` | `admin add-user`. |
-| `summary` | `exit`, `hint`, `exitCode`, `state`, `jobId`, `error`, `logFile`, and per command: `ok`, `source` (`status`), `failed` (`doctor`, `prune`), `count` and `dryRun` (`prune`), `file` and `profiles` (`init`) | The last line. |
+| `summary` | `exit`, `hint`, `exitCode`, `state` (a job state, `error`, or `detached`), `jobId`, `error`, `logFile`, and per command: `ok`, `source` (`status`), `failed` (`doctor`, `prune`), `count` and `dryRun` (`prune`), `file` and `profiles` (`init`) | The last line. |
 
-In the summary, `exit` is the status of the CLI, the same as `$?`, and `exitCode` is the status of the command on the worker (`null` when it did not run). `hint` is present when `exit` is not 0 and says what to do, in one line. `logFile` is the local copy of the job log next to `testbox.yml`: `.testbox/logs/<job-id>.log`, or `.testbox/logs/run_<id>.log` with `--direct` (no job exists there). `logs --follow` writes it too when it runs inside a repo with `testbox.yml`. A `state` of `error` means the command stopped before a job existed; `error` has the message. A log file that cannot be written does not fail the job: an `info` event says why, and the summary has no `logFile`.
+In the summary, `exit` is the status of the CLI, the same as `$?`, and `exitCode` is the status of the command on the worker (`null` when it did not run). `hint` is present when `exit` is not 0, and on a `detached` summary; it says what to do, in one line. `logFile` is the local copy of the job log next to `testbox.yml`: `.testbox/logs/<job-id>.log`, or `.testbox/logs/run_<id>.log` with `--direct` (no job exists there). `logs --follow` writes it too when it runs inside a repo with `testbox.yml`. A `state` of `error` means the command stopped before a job existed; `error` has the message. A `state` of `detached` (exit 0, `exitCode` `null`) means the CLI stopped following a job that still runs: after `--detach`, SIGTERM, SIGHUP, or "detach" at the Ctrl-C prompt. Its `hint` is `the job continues on the worker: testbox logs <job-id> --follow, or testbox status <job-id>`. After `--detach` there is no `logFile`; `logs --follow` writes it. A log file that cannot be written does not fail the job: an `info` event says why, and the summary has no `logFile`.
 
 ## testbox.yml
 
@@ -92,7 +92,7 @@ A worker finds these labels itself:
 | --- | --- |
 | `macos` or `linux`, `arm64` or `x64` | always |
 | `node` | always |
-| `pnpm`, `mise` | when they are on the worker's `PATH` |
+| `pnpm`, `mise`, `xcodegen`, `docker` | when the command is on the login shell's `PATH` |
 | `browser` | when `google-chrome`, `google-chrome-stable`, `chromium`, `chromium-browser`, `firefox`, or `microsoft-edge` is on the login shell's `PATH` (an app in `/Applications` only is not found) |
 | `xcode`, `xcode-<version>` | when `xcodebuild -version` works |
 | `ios-simulator` | when `xcrun simctl help` works |
@@ -111,7 +111,7 @@ When several workers qualify, the one that last ran this workspace wins, so its 
 
 Before it submits, `verify` asks the API for a worker. If no healthy worker has the labels, the submit fails at once (exit 11). After the submit, the job is pinned to that worker; when the worker is busy, the job waits.
 
-Latest wins: a newer queued job for the same user, workspace, and profile cancels the older queued one. This applies only to jobs with a profile; `run "<command>"` jobs without `--profile` do not cancel each other. A running job is never cancelled by a newer submit.
+Latest wins: a newer queued job for the same user, workspace, and profile cancels the older queued one. This applies only to jobs with a profile; `run "<command>"` jobs without `--profile` do not cancel each other. A `run "<command>" --profile NAME` job and a `verify NAME` job have the same profile, so the newer one cancels the older one while it is queued. A running job is never cancelled by a newer submit.
 
 Job states: `queued → assigned → running → succeeded | failed | cancelled | timed_out`. The worker renews a lease (30 s) while it runs a job. When a worker stops, its lease expires and the job goes to `timed_out` (exit 12). No other worker runs it again. A worker that cannot renew its lease stops the command.
 

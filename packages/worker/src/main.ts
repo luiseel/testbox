@@ -1,7 +1,7 @@
 import os from 'os';
 import path from 'path';
 import { readWorkerConfigFile } from '@testbox/shared';
-import { capabilityLabels, commandOnPath, detectBrowser, hasIosSimulator } from './capabilities';
+import { capabilityLabels, detectBrowser, detectTools, hasIosSimulator } from './capabilities';
 import { startDaemon } from './daemon';
 import { probeRuntime } from './probe';
 
@@ -33,8 +33,7 @@ async function loadLabels(env: NodeJS.ProcessEnv, dataDir: string, workerId: str
     xcodeVersion: runtime.xcodeVersion,
     iosSimulator: await hasIosSimulator(),
     browser: await detectBrowser(),
-    pnpm: await commandOnPath('pnpm'),
-    mise: await commandOnPath('mise'),
+    tools: await detectTools(),
     // `worker:<id>` lets a profile (or `testbox admin add-worker`) target one machine.
     extra: [...extraLabels(env), ...(file?.labels ?? []), `worker:${workerId}`],
   });
