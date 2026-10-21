@@ -227,7 +227,16 @@ export class JobsController {
       if (closed) return;
       res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
-    const finish = (state: JobRecord['state'], exitCode: number | null, error: string | null) => {
+    let finishing = false;
+    const finish = async (state: JobRecord['state'], exitCode: number | null, error: string | null) => {
+      if (finishing) return;
+      finishing = true;
+      // The state can arrive before the last log events; send what the store has first.
+      for (const line of await this.store.readLogs(id, cursor).catch(() => [])) {
+        if (line.offset < cursor) continue;
+        write('log', line);
+        cursor = line.offset + 1;
+      }
       write('done', { state, exitCode, error });
       cleanup();
     };
@@ -239,7 +248,7 @@ export class JobsController {
         write('log', { offset: event.offset, stream: event.stream, line: event.line });
       } else if (event.type === 'state') {
         write('state', { state: event.state, exitCode: event.exitCode, error: event.error });
-        if (isTerminal(event.state)) finish(event.state, event.exitCode, event.error);
+        if (isTerminal(event.state)) void finish(event.state, event.exitCode, event.error);
       }
     });
     const backlog = await this.store.readLogs(id, cursor);
@@ -252,7 +261,7 @@ export class JobsController {
       void this.store.getJob(id).then((current) => {
         if (!current) return;
         write('state', { state: current.state, exitCode: current.exitCode, error: current.error });
-        if (isTerminal(current.state)) finish(current.state, current.exitCode, current.error);
+        if (isTerminal(current.state)) return finish(current.state, current.exitCode, current.error);
       }).catch(() => undefined);
     }, 500);
     const ping = setInterval(() => {
