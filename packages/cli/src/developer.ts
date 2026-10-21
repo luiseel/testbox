@@ -113,7 +113,7 @@ export class DeveloperApp {
       add({
         ok: false,
         label: `API at ${user.apiUrl}`,
-        fix: `not on the office LAN? Turn on Twingate; it needs a resource for ${new URL(user.apiUrl).host}`,
+        fix: `not on the office LAN? Turn on your VPN; it must reach ${new URL(user.apiUrl).host}`,
       });
       return stop(ExitCode.NoWorker);
     }
@@ -253,7 +253,7 @@ export class DeveloperApp {
         label: `SSH to ${host}`,
         fix: denied
           ? `send this to an admin: testbox admin authorize '${key ?? '<your ~/.ssh/id_ed25519.pub>'}'`
-          : `cannot reach ${host}. Not on the office LAN? Turn on Twingate; it needs a resource for ${host.split('@').pop()} port 22`,
+          : `cannot reach ${host}. Not on the office LAN? Turn on your VPN; it must reach ${host.split('@').pop()} port 22`,
       });
     } else {
       checks.push({

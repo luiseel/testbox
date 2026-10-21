@@ -24,7 +24,7 @@ The worker log is `~/testbox/logs/worker.stderr.log` on a Mac, and `journalctl -
 | `verify` exits 11: `no compatible worker is heartbeating`. | The workers with those labels are down. | `testbox doctor`. A down worker: `testbox admin add-worker` for it. |
 | The job stays `queued`. | Its worker is busy, or it stopped after the submit. | `testbox status <job-id>`, then `testbox doctor`. |
 | `verify` exits 11, `Permission denied (publickey)`. | The worker does not have your SSH key. | `testbox doctor` prints a `testbox admin authorize '<key>'` line; send it to an admin. |
-| `verify` exits 11, `Operation timed out` or `Could not resolve hostname`. | You are not on the LAN, or the worker is off. | Turn on Twingate (see [setup](setup.md#access-from-outside-the-lan)). Use IPs, not `.local` names. |
+| `verify` exits 11, `Operation timed out` or `Could not resolve hostname`. | You are not on the LAN, or the worker is off. | Connect to the LAN or turn on your VPN (see [setup](setup.md#access-from-outside-the-lan)). Use IPs, not `.local` names. |
 | Snapshot fails: `node: command not found` or `spawn flock ENOENT`. | The worker was set up before `testbox admin add-worker` existed. | `testbox admin add-worker <user>@<ip>`. |
 | `JAVA_HOME is not set` (or another missing tool). | The worker has no such tool on `PATH`. | Pin the tool in the repo's `mise.toml` and `requires: [mise]`. The worker runs `mise install` and `mise exec` for each job. |
 | `swift build` or `swift test` prints nothing and never ends on a Mac worker. | Swift Build hangs in a LaunchAgent session. | Use `swift test --build-system native` (`testbox init` writes this). |
