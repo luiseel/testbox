@@ -226,6 +226,13 @@ describe('queue and execution', () => {
     expect(lines).toEqual(expect.arrayContaining(['app', 'linked']));
     const artifacts = await call(ctx, alice.token, 'GET', `/v1/jobs/${job.id}/artifacts`);
     expect(artifacts.json.files.map((file: { path: string }) => file.path)).toEqual(['app.txt']);
+
+    // The digest covers the linked tree too: a change there after the register fails the next job.
+    await writeFile(path.join(ctx.dataDir, snap.relPath, 'api', 'client', 'Package.swift'), 'changed\n');
+    const again = await call(ctx, alice.token, 'POST', '/v1/jobs', { workspaceId: ws.json.id, snapshotId, command: 'true' });
+    expect(again.status).toBe(201);
+    const failed = await waitJob(ctx, alice.token, again.json.job.id);
+    expect(failed).toMatchObject({ state: 'failed', error: 'snapshot digest mismatch' });
   });
 
   it('fails a job whose snapshot changed after submission and does not run it', async () => {

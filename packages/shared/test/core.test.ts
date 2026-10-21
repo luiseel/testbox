@@ -193,6 +193,8 @@ profiles:
     expect(bad('[../api]')).toThrow(ConfigError);
     expect(bad('[../api]')).toThrow('a link name must match');
     expect(bad('[api, api]')).toThrow('a link name is listed twice');
+    expect(bad('[api, API]')).toThrow('a link name is listed twice');
+    expect(bad('[Interface]')).toThrow('a link cannot have the project name interface');
     expect(bad('[interface]')).toThrow('a link cannot have the project name interface');
     const many = `[${Array.from({ length: 21 }, (_, i) => `l${i}`).join(', ')}]`;
     expect(bad(many)).toThrow('a profile can have at most 20 links');

@@ -671,6 +671,8 @@ describe('agent-facing cli: links', () => {
       };
       await bad(['run', 'make', '--link', 'api'], 'invalid --link api: pass --link <name>=<path>');
       await bad(['run', 'make', '--link', 'api=../api', '--link', 'api=../api'], '--link api is given twice');
+      await bad(['run', 'make', '--link', 'api=../api', '--link', 'API=../api'], '--link API is given twice');
+      await bad(['run', 'make', '--link', 'Interface=../api'], '--link Interface: a link cannot have the project name interface');
       await bad(['run', 'make', '--link', 'api=.'], `link api: ${main} is this checkout`);
       await bad(['run', 'make', '--link', 'interface=../api'], '--link interface: a link cannot have the project name interface');
       await symlink(path.join(root, 'api'), path.join(root, 'api-alias'));

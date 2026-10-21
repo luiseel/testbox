@@ -151,11 +151,12 @@ export async function createSnapshot(opts: {
     if (!opts.workDir) throw new Error('a snapshot with links needs a work dir');
     assertSafeSegment(opts.workDir, 'work dir');
     trees[0].folder = opts.workDir;
-    const names = new Set([opts.workDir]);
+    // Case does not count: this disk can be case-insensitive, so App and app would be one folder.
+    const names = new Set([opts.workDir.toLowerCase()]);
     for (const link of links) {
       assertSafeSegment(link.name, 'link name');
-      if (names.has(link.name)) throw new Error(`link name ${link.name} is used twice`);
-      names.add(link.name);
+      if (names.has(link.name.toLowerCase())) throw new Error(`link name ${link.name} is used twice`);
+      names.add(link.name.toLowerCase());
       trees.push({ stagingRel: link.stagingRel, ignore: link.ignore, folder: link.name });
     }
   }

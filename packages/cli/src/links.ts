@@ -26,7 +26,7 @@ export function parseLinkFlags(values: readonly string[] | undefined, cwd: strin
     const name = at > 0 ? value.slice(0, at) : '';
     const dir = at > 0 ? value.slice(at + 1) : '';
     if (!SAFE_SEGMENT.test(name) || !dir) throw new LinkError(`invalid --link ${value}: pass --link <name>=<path>`);
-    if (overrides.has(name)) throw new LinkError(`--link ${name} is given twice`);
+    if ([...overrides.keys()].some((other) => other.toLowerCase() === name.toLowerCase())) throw new LinkError(`--link ${name} is given twice`);
     overrides.set(name, path.resolve(cwd, dir));
   }
   return overrides;

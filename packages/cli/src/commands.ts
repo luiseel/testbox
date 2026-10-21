@@ -15,6 +15,7 @@ import {
   needsDependencyRefresh,
   sessionName,
   type DependencyFingerprint,
+  type JobSource,
   type JobState,
   type MutagenSessionInfo,
   type ProfileConfig,
@@ -36,7 +37,7 @@ import { attachInterrupt } from './interrupt';
 import { withSnapshotLocks } from './lock';
 import { Output, type Summary, type TextSink } from './output';
 import { mutagenDestination, MutagenSsh, RemoteUnavailable, SyncError, type RemoteRunner } from './remote';
-import { LinkError, parseLinkFlags, resolveLinks } from './links';
+import { LinkError, parseLinkFlags, resolveLinks, type LinkedCheckout } from './links';
 import { collectSource } from './source';
 
 export interface CliIO {
@@ -472,10 +473,63 @@ export class TestboxApp {
       const links = await resolveLinks(configDir, loaded.config.project, linkNames, overrides);
       const user = await this.requireUser(flags.direct === true);
       const requires = profile?.requires ?? [];
+      if (flags.direct) {
+        const state = await this.resolveState(loaded, flags, user, output, requires);
+        const ssh = this.ssh(state.sshHost, user?.identityFile);
+        await ssh.flush(state.sessionName);
+        await this.printSource(output, configDir, []);
+        return await this.direct(ssh, state, command, output, timeoutMs);
+      }
+      if (!user) return ExitCode.Auth;
+      const api = this.api(user);
+      // Another run on this machine may share a checkout (a link of both): hold every checkout from the
+      // first read of its workspace state to the resume of its sync, so the two runs take turns.
+      const submitted = await withSnapshotLocks([configDir, ...links.map((link) => link.dir)], () =>
+        this.submit(loaded, links, user, api, command, profileName, profile, flags, output, timeoutMs),
+      );
+      output.event({ type: 'status', state: submitted.job.state, jobId: submitted.job.id });
+      if (flags.detach) {
+        output.summary(detachedSummary(submitted.job.id));
+        return ExitCode.Pass;
+      }
+      return await this.follow(api, submitted.job.id, output, this.logFile(configDir, submitted.job.id));
+    } catch (err) {
+      return this.fail(output, err);
+    }
+  }
+
+  /** The `source` event (or line): the main checkout and its links. */
+  private async printSource(output: Output, configDir: string, links: LinkedCheckout[]): Promise<JobSource> {
+    const source = await collectSource(this.io.remote, configDir);
+    if (links.length > 0) {
+      source.links = [];
+      for (const link of links) source.links.push({ name: link.name, ...(await collectSource(this.io.remote, link.dir)) });
+    }
+    if (this.json) output.event({ type: 'source', ...source });
+    else output.info(formatJobSource(source));
+    return source;
+  }
+
+  /** Under the checkout locks: workspaces and sessions, the snapshot, and the job. */
+  private async submit(
+    loaded: LoadedConfig,
+    links: LinkedCheckout[],
+    user: UserConfig,
+    api: HttpApi,
+    command: string,
+    profileName: string | null,
+    profile: ProfileConfig | null,
+    flags: CommonFlags,
+    output: Output,
+    timeoutMs: number,
+  ): Promise<{ job: { id: string; state: string } }> {
+    {
+      const configDir = path.dirname(loaded.file);
+      const requires = profile?.requires ?? [];
       let state = await this.resolveState(loaded, flags, user, output, requires);
       let worker: { id: string; sshHost: string } | null = null;
-      if (!flags.direct && user) {
-        const selected = await this.api(user).selectWorker({ requires, workspaceId: state.id });
+      {
+        const selected = await api.selectWorker({ requires, workspaceId: state.id });
         if (selected?.sshHost) {
           worker = { id: selected.id, sshHost: selected.sshHost };
           state = await this.ensureWorkerSession(state, worker, configDir, loaded.config.ignore, user.identityFile);
@@ -493,22 +547,10 @@ export class TestboxApp {
         }
         trees.push({ name: link.name, dir: link.dir, ignore: link.loaded.config.ignore, state: linkState });
       }
-      const ssh = this.ssh(state.sshHost, user?.identityFile);
-      const source = await collectSource(this.io.remote, configDir);
-      if (links.length > 0) {
-        source.links = [];
-        for (const link of links) source.links.push({ name: link.name, ...(await collectSource(this.io.remote, link.dir)) });
-      }
-      if (this.json) output.event({ type: 'source', ...source });
-      else output.info(formatJobSource(source));
-      if (flags.direct) {
-        await ssh.flush(state.sessionName);
-        return await this.direct(ssh, state, command, output, timeoutMs);
-      }
-      if (!user) return ExitCode.Auth;
+      const ssh = this.ssh(state.sshHost, user.identityFile);
+      const source = await this.printSource(output, configDir, links);
       const snapshotId = createId('snap');
       const digested = await this.snapshotTrees(ssh, user, trees, snapshotId, output);
-      const api = this.api(user);
       await api.registerSnapshot(state.id, { id: snapshotId, digest: digested.digest, workDir: digested.workDir });
       const created = await api.createJob({
         workspaceId: state.id,
@@ -522,20 +564,13 @@ export class TestboxApp {
         targetWorkerId: worker?.id,
         source,
       });
-      output.event({ type: 'status', state: created.job.state, jobId: created.job.id });
-      if (flags.detach) {
-        output.summary(detachedSummary(created.job.id));
-        return ExitCode.Pass;
-      }
-      return await this.follow(api, created.job.id, output, this.logFile(state.configDir, created.job.id));
-    } catch (err) {
-      return this.fail(output, err);
+      return created;
     }
   }
 
   /**
    * Flush and pause every session, take one snapshot of all trees, and resume every paused session,
-   * also when the snapshot fails. The main tree is `trees[0]`. All of it runs under the lock of each tree.
+   * also when the snapshot fails. The main tree is `trees[0]`. The caller holds the lock of each tree.
    */
   private async snapshotTrees(
     ssh: MutagenSsh,
@@ -545,11 +580,8 @@ export class TestboxApp {
     output: Output,
   ): Promise<{ digest: string; relPath: string; workDir?: string }> {
     const [main, ...links] = trees;
-    // Another run on this machine may share a tree (a link of both): hold each tree from its flush to its resume.
-    return withSnapshotLocks(trees.map((tree) => tree.dir), async () => {
-      for (const tree of trees) await ssh.flush(tree.state.sessionName);
-      return this.pauseAndSnapshot(ssh, user, main, links, snapshotId, output);
-    });
+    for (const tree of trees) await ssh.flush(tree.state.sessionName);
+    return this.pauseAndSnapshot(ssh, user, main, links, snapshotId, output);
   }
 
   private async pauseAndSnapshot(
@@ -878,7 +910,9 @@ export function exitCodeForFailure(err: unknown): number {
 function jobLinkNames(project: string, profileName: string | null, profile: ProfileConfig | null, overrides: Map<string, string>): string[] {
   if (!profile) {
     // The same rules as `links` in testbox.yml: the main tree is the folder <project>, and the API caps the count.
-    if (overrides.has(project)) throw new UsageError(`--link ${project}: a link cannot have the project name ${project}`);
+    // Case does not count: a Mac worker's disk can be case-insensitive, so App and app are one folder.
+    const taken = [...overrides.keys()].find((name) => name.toLowerCase() === project.toLowerCase());
+    if (taken) throw new UsageError(`--link ${taken}: a link cannot have the project name ${project}`);
     if (overrides.size > JOB_SOURCE_MAX_LINKS) throw new UsageError(`--link: at most ${JOB_SOURCE_MAX_LINKS} links`);
     return [...overrides.keys()];
   }

@@ -28,7 +28,8 @@ const profileObject = z.object({
     .array(z.string().regex(SAFE_SEGMENT, { message: `a link name must match ${SAFE_SEGMENT.source}` }))
     .max(JOB_SOURCE_MAX_LINKS, { message: `a profile can have at most ${JOB_SOURCE_MAX_LINKS} links` })
     .default([])
-    .refine((links) => new Set(links).size === links.length, { message: 'a link name is listed twice' }),
+    // Case does not count: a Mac worker's disk can be case-insensitive, so App and app are one folder.
+    .refine((links) => new Set(links.map((link) => link.toLowerCase())).size === links.length, { message: 'a link name is listed twice' }),
 });
 
 /** `command` is accepted as an alias for `cmd` so the documented examples parse. */
@@ -51,7 +52,7 @@ const configSchema = z
   .superRefine((config, ctx) => {
     // With links, the main tree is the folder <project> in the snapshot: a link of that name would overwrite it.
     for (const [name, profile] of Object.entries(config.profiles)) {
-      if (profile.links.includes(config.project)) {
+      if (profile.links.some((link) => link.toLowerCase() === config.project.toLowerCase())) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: `profile ${name}: a link cannot have the project name ${config.project}` });
       }
     }

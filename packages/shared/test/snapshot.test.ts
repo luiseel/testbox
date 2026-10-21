@@ -156,6 +156,24 @@ describe('snapshots', () => {
     expect(marked).toBe(true);
     await rm(dir, { recursive: true, force: true });
   });
+  it('rejects link names that differ only in case from the work dir or each other', async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), 'tb-snap-'));
+    try {
+      for (const rel of ['workspaces/u/app/ws1', 'workspaces/u/App/ws2']) await mkdir(path.join(dataDir, rel), { recursive: true });
+      const make = (links: { name: string; stagingRel: string; ignore: string[] }[]) =>
+        createSnapshot({ dataDir, stagingRel: 'workspaces/u/app/ws1', snapshotId: 'snap_case', ignore: [], retentionMs: 1000, workDir: 'app', links });
+      await expect(make([{ name: 'App', stagingRel: 'workspaces/u/App/ws2', ignore: [] }])).rejects.toThrow('link name App is used twice');
+      await expect(
+        make([
+          { name: 'kit', stagingRel: 'workspaces/u/App/ws2', ignore: [] },
+          { name: 'KIT', stagingRel: 'workspaces/u/App/ws2', ignore: [] },
+        ]),
+      ).rejects.toThrow('link name KIT is used twice');
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
 });
 
 describe('retention', () => {
@@ -225,6 +243,7 @@ describe('dependency cache', () => {
     expect(await readFile(path.join(cache, 'modules', first.digest, 'marker.txt'), 'utf8')).toContain('install-1');
     await rm(root, { recursive: true, force: true });
   });
+
 });
 
 function buildFp(lock: string) {
