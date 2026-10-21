@@ -31,8 +31,8 @@ describe('mise', () => {
   });
 
   it('adds the mise label only when mise is on PATH', () => {
-    const base = { platform: 'linux', arch: 'x64', xcodeVersion: null, iosSimulator: false, browser: false, pnpm: true };
-    expect(capabilityLabels({ ...base, mise: true })).toEqual(['linux', 'x64', 'node', 'pnpm', 'mise']);
-    expect(capabilityLabels({ ...base, mise: false })).not.toContain('mise');
+    const base = { platform: 'linux', arch: 'x64', xcodeVersion: null, iosSimulator: false, browser: false };
+    expect(capabilityLabels({ ...base, tools: ['pnpm', 'mise'] })).toEqual(['linux', 'x64', 'node', 'pnpm', 'mise']);
+    expect(capabilityLabels({ ...base, tools: ['pnpm'] })).not.toContain('mise');
   });
 });

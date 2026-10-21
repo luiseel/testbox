@@ -32,7 +32,7 @@ import {
   type WorkspaceState,
 } from './config-store';
 import { attachInterrupt } from './interrupt';
-import { Output, type TextSink } from './output';
+import { Output, type Summary, type TextSink } from './output';
 import { mutagenDestination, MutagenSsh, RemoteUnavailable, SyncError, type RemoteRunner } from './remote';
 import { LinkError, parseLinkFlags, resolveLinks } from './links';
 import { collectSource } from './source';
@@ -345,11 +345,22 @@ export class TestboxApp {
     }
   }
 
+  /** A custom command. With `--profile`, the job also gets that profile's `requires` and `artifacts`. */
   async run(command: string, flags: CommonFlags): Promise<number> {
-    return this.execute(command, flags.profile ?? null, null, flags);
+    if (!flags.profile) return this.execute(command, null, null, flags);
+    const profile = await this.findProfile(flags.profile, flags);
+    if (typeof profile === 'number') return profile;
+    return this.execute(command, flags.profile, profile, flags);
   }
 
   async verify(profileName: string, flags: CommonFlags): Promise<number> {
+    const profile = await this.findProfile(profileName, flags);
+    if (typeof profile === 'number') return profile;
+    return this.execute(profile.cmd, profileName, profile, flags);
+  }
+
+  /** The profile from testbox.yml, or the exit code after the failure is printed. */
+  private async findProfile(profileName: string, flags: CommonFlags): Promise<ProfileConfig | number> {
     const output = this.out(flags);
     let loaded;
     try {
@@ -363,7 +374,7 @@ export class TestboxApp {
       const known = names.length ? `the profiles in ${loaded.file} are: ${names.join(', ')}` : `${loaded.file} has no profiles`;
       return this.fail(output, new UsageError(`unknown profile ${profileName}; ${known}`));
     }
-    return this.execute(profile.cmd, profileName, profile, flags);
+    return profile;
   }
 
   async status(jobId: string): Promise<number> {
@@ -508,7 +519,7 @@ export class TestboxApp {
       });
       output.event({ type: 'status', state: created.job.state, jobId: created.job.id });
       if (flags.detach) {
-        output.summary({ jobId: created.job.id, state: created.job.state, exitCode: null, exit: 0 });
+        output.summary(detachedSummary(created.job.id));
         return ExitCode.Pass;
       }
       return await this.follow(api, created.job.id, output, this.logFile(state.configDir, created.job.id));
@@ -683,7 +694,7 @@ export class TestboxApp {
       if (log?.error) output.info(log.error);
     }
     if (detached) {
-      output.summary({ jobId, state: 'detached', exitCode: 0, exit: 0, logFile: log?.path });
+      output.summary(detachedSummary(jobId, log?.path));
       return ExitCode.Pass;
     }
     if (!terminal) {
@@ -867,6 +878,18 @@ function otherRootsSyncingTo(sessions: MutagenSessionInfo[], stagingRel: string,
     if (session.betaUrl.endsWith(`/${stagingRel}`)) roots.add(session.alphaPath);
   }
   return [...roots];
+}
+
+/** The summary when the CLI stops following a job that still runs: say how to find it again. */
+function detachedSummary(jobId: string, logFile?: string): Summary {
+  return {
+    jobId,
+    state: 'detached',
+    exitCode: null,
+    exit: ExitCode.Pass,
+    logFile,
+    hint: `the job continues on the worker: testbox logs ${jobId} --follow, or testbox status ${jobId}`,
+  };
 }
 
 async function findWorkspace(api: HttpApi, id: string): Promise<{ id: string; stagingRel: string } | null> {

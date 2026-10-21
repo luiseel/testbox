@@ -243,6 +243,117 @@ describe('agent-facing cli', () => {
   });
 });
 
+/** fakeApi, but the event stream stays open until the CLI aborts it. `onStream` runs once the stream is open. */
+function openStreamApi(seen: string[], onStream: () => void): typeof fetch {
+  const api = fakeApi(seen);
+  return (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    if (!url.endsWith('/events')) return api(input, init);
+    seen.push(`GET ${new URL(url).pathname}`);
+    const signal = init?.signal;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('event: log\ndata: {"stream":"stdout","line":"building","offset":1}\n\n'));
+        signal?.addEventListener('abort', () => controller.error(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+      },
+    });
+    setTimeout(onStream, 0);
+    return new Response(body, { status: 200 });
+  }) as typeof fetch;
+}
+
+describe('agent-facing cli: detach and run --profile', () => {
+  it('detaches on SIGTERM and SIGHUP: exit 0, the job id and a hint, and the job is not cancelled', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
+    const project = await mkdtemp(path.join(os.tmpdir(), 'tb-proj-'));
+    const stderr: string[] = [];
+    try {
+      await loggedIn(home);
+      await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
+      for (const signal of ['SIGTERM', 'SIGHUP']) {
+        const stdout: string[] = [];
+        const seen: string[] = [];
+        const cli = io(home, project, quietRemote, stdout, stderr);
+        cli.fetchImpl = openStreamApi(seen, () => cli.signals.emit(signal));
+        expect(await runCli(['verify', 'unit', '--json', '--quiet'], cli)).toBe(0);
+        expect(jsonLines(stdout).at(-1)).toMatchObject({
+          type: 'summary',
+          jobId: 'job_9',
+          state: 'detached',
+          exitCode: null,
+          exit: 0,
+          logFile: path.join(project, '.testbox', 'logs', 'job_9.log'),
+          hint: 'the job continues on the worker: testbox logs job_9 --follow, or testbox status job_9',
+        });
+        expect(seen).toContain('GET /v1/jobs/job_9/events');
+        expect(seen.some((request) => request.endsWith('/cancel'))).toBe(false);
+        expect(cli.signals.listenerCount(signal)).toBe(0);
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true });
+      await rm(project, { recursive: true, force: true });
+    }
+  });
+
+  it('gives the --detach summary the same hint', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
+    const project = await mkdtemp(path.join(os.tmpdir(), 'tb-proj-'));
+    const stdout: string[] = [];
+    const seen: string[] = [];
+    try {
+      await loggedIn(home);
+      await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
+      expect(await runCli(['verify', 'unit', '--json', '--detach'], io(home, project, quietRemote, stdout, [], fakeApi(seen)))).toBe(0);
+      expect(jsonLines(stdout).at(-1)).toMatchObject({
+        type: 'summary',
+        jobId: 'job_9',
+        state: 'detached',
+        exitCode: null,
+        exit: 0,
+        hint: 'the job continues on the worker: testbox logs job_9 --follow, or testbox status job_9',
+      });
+      expect(seen.some((request) => request.endsWith('/events'))).toBe(false);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+      await rm(project, { recursive: true, force: true });
+    }
+  });
+
+  it('run --profile sends the profile requires and artifacts with the custom command, and exits 2 for an unknown profile', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
+    const project = await mkdtemp(path.join(os.tmpdir(), 'tb-proj-'));
+    const stdout: string[] = [];
+    const seen: string[] = [];
+    const jobs: unknown[] = [];
+    try {
+      await loggedIn(home);
+      await writeFile(
+        path.join(project, 'testbox.yml'),
+        'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n    requires: [linux]\n    artifacts: ["coverage/**"]\n  lint:\n    cmd: pnpm lint\n',
+      );
+      const api = fakeApi([]);
+      const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+        if (String(input).endsWith('/jobs') && init?.method === 'POST') jobs.push(JSON.parse(String(init.body)));
+        return api(input, init);
+      }) as typeof fetch;
+      expect(await runCli(['run', 'pnpm test -- one', '--profile', 'unit', '--json'], io(home, project, quietRemote, stdout, [], fetchImpl))).toBe(0);
+      expect(jobs[0]).toMatchObject({ command: 'pnpm test -- one', profile: 'unit', requires: ['linux'], artifactGlobs: ['coverage/**'] });
+
+      stdout.length = 0;
+      seen.length = 0;
+      expect(await runCli(['run', 'pnpm test', '--profile', 'nope', '--json'], io(home, project, quietRemote, stdout, [], fakeApi(seen)))).toBe(2);
+      const summary = jsonLines(stdout).at(-1);
+      expect(summary).toMatchObject({ type: 'summary', state: 'error', exit: 2 });
+      expect(summary?.error).toContain('unknown profile nope; the profiles in');
+      expect(summary?.error).toContain('unit, lint');
+      expect(seen).toEqual([]);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+      await rm(project, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('agent-facing cli: the summary contract on every path', () => {
   it('validates --timeout before any network call and exits 2', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));

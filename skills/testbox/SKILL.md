@@ -22,9 +22,10 @@ testbox run "<command>" --json --quiet    # any command, same flow
 
 - Always pass `--json`. It prints NDJSON events and ends with one `summary` line, in one ordered stream. Without it, stdout and stderr can arrive out of order through a pipe.
 - Prefer `--quiet` for test suites. The log is not printed; it is written to `.testbox/logs/<job-id>.log` (the `logFile` field of the summary). Read the end of that file when the job fails: `tail -n 100 <logFile>`, or grep it for `FAIL`, `error`, or the test name. Without `--quiet`, every log line is also an event, and the file is still written.
-- The summary line has `state`, `exitCode` (the command's own status), `exit` (the CLI's exit code, see the table), `logFile`, and for a non-zero `exit` a `hint` that says what to do. Read `exit` from the summary or `$?`; both are the same.
+- The summary line has `state`, `exitCode` (the command's own status), `exit` (the CLI's exit code, see the table), `logFile`, and for a non-zero `exit` a `hint` that says what to do. `state` `detached` (exit 0) means the job still runs; its `hint` says how to follow it. Read `exit` from the summary or `$?`; both are the same.
 - The `source` event shows which checkout the job tested: `path`, `branch`, `commit`, `dirty`, and `links` (the same for each linked checkout). Make sure it is the checkout you changed.
-- The default timeout is 1800 s. Set the Bash tool timeout to match, or use `--timeout <seconds>`. For long jobs, use `--detach` (the summary has the job id), then `testbox logs <job-id> --follow` or `testbox status <job-id>`.
+- A Claude Code Bash call ends at 600 s; the default job timeout is 1800 s (`--timeout <seconds>` changes it). Run `verify` with the tool's background option (`run_in_background` in Claude Code), or pass `--detach` (the summary has the job id) and then `testbox status <job-id>` or `testbox logs <job-id> --follow`. If the harness kills the CLI anyway, the job continues; `.testbox/logs/<job-id>.log` and `testbox status` still work.
+- A profile command is fixed. For one test or one target, use `testbox run "<command>" --profile <name>`; the job gets the profile's `requires` and `artifacts`. Write the command the profile needs (for example source the same setup script).
 - Never run two `verify` calls for the same profile at once: a newer queued job cancels the older queued one (exit 13).
 - Artifacts: `testbox artifacts <job-id>` downloads them into `./.testbox/<job-id>/`.
 - `testbox cancel <job-id>` stops a job.
@@ -63,12 +64,12 @@ profiles:
     links: [api]                # the sibling checkout ../api, uncommitted changes too
 ```
 
-Labels a worker finds itself: `macos` / `linux`, `arm64` / `x64`, `node`, `pnpm`, `mise`, `browser`, `xcode`, `xcode-<version>`, `ios-simulator`, `worker:<id>`. Use labels; never name a host.
+Labels a worker finds itself: `macos` / `linux`, `arm64` / `x64`, `node`, `pnpm`, `mise`, `xcodegen`, `docker`, `browser`, `xcode`, `xcode-<version>`, `ios-simulator`, `worker:<id>`. Use labels; never name a host.
 
 Rules for good profiles:
 - The worker environment is minimal: only `PATH`, `HOME`, and a few system variables. Local env vars and `.env` files are not there.
 - A missing tool (for example `JAVA_HOME is not set`): pin it in the repo's `mise.toml` and add `requires: [mise]`. The worker runs `mise install` and `mise exec` for each job.
-- With `package.json` and `pnpm-lock.yaml`, the worker installs `node_modules` itself (cached by lockfile). Do not put `pnpm install` in the command.
+- The worker installs `node_modules` itself (cached by lockfile) only when `package.json` and `pnpm-lock.yaml` are in the repo root; then do not put `pnpm install` in the command. For a package in a subfolder (for example `console/`), keep `pnpm install --frozen-lockfile` in the command.
 - Testbox does not reset simulators, and other users can share the Mac. For a clean simulator, make one in the command (`xcrun simctl create`), use its UDID as the destination, and delete it in a `trap ... EXIT`.
 - Swift on a Mac worker: use `swift test --build-system native`; the default build system hangs there.
 - The build reads a path outside the repo (for example `../api/client/swift-client`)? Add `links: [api]`. The job then runs in a folder with `../api` next to it. The CLI finds `../api_<suffix>` (when this checkout is `<project>_<suffix>`) or `../api`; else pass `--link api=<path>`. The linked checkout needs its own `testbox.yml`. A missing one exits 2.

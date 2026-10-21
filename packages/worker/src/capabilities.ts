@@ -33,19 +33,22 @@ export function xcodeLabels(versionLine: string | null): string[] {
   return labels;
 }
 
+/** Commands on the login-shell PATH that become labels with the same name, in this order. */
+export const TOOL_LABELS = ['pnpm', 'mise', 'xcodegen', 'docker'] as const;
+
 export function capabilityLabels(input: {
   platform: string;
   arch: string;
   xcodeVersion: string | null;
   iosSimulator: boolean;
   browser: boolean;
-  pnpm: boolean;
-  mise?: boolean;
+  /** The entries of TOOL_LABELS that the worker found. */
+  tools?: readonly string[];
   extra?: readonly string[];
 }): string[] {
   const labels = [osLabel(input.platform), archLabel(input.arch), 'node'];
-  if (input.pnpm) labels.push('pnpm');
-  if (input.mise) labels.push('mise');
+  const found = new Set(input.tools ?? []);
+  labels.push(...TOOL_LABELS.filter((tool) => found.has(tool)));
   if (input.platform === 'darwin') {
     labels.push(...xcodeLabels(input.xcodeVersion));
     if (input.iosSimulator) labels.push('ios-simulator');
@@ -66,6 +69,15 @@ export async function commandOnPath(name: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** The entries of TOOL_LABELS that are on the login-shell PATH. */
+export async function detectTools(exists: (name: string) => Promise<boolean> = commandOnPath): Promise<string[]> {
+  const found: string[] = [];
+  for (const tool of TOOL_LABELS) {
+    if (await exists(tool)) found.push(tool);
+  }
+  return found;
 }
 
 export async function hasIosSimulator(platform: NodeJS.Platform = process.platform): Promise<boolean> {
