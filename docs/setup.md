@@ -10,7 +10,7 @@ The `testbox admin` commands do steps 1 and 2 over SSH from one machine, the *ad
 
 ## Before you start
 
-- **Fixed LAN addresses.** Give the control plane and each worker a fixed IP (a DHCP reservation is enough). Use IPs in all commands, not `.local` names: Twingate and the workers cannot resolve mDNS names.
+- **Fixed LAN addresses.** Give the control plane and each worker a fixed IP (a DHCP reservation is enough). Use IPs in all commands, not `.local` names: a VPN and the workers cannot resolve mDNS names.
 - **SSH from the admin machine.** Your SSH key must open each host without a password: `ssh <user>@<ip> true`. Use one account per host for testbox. On a Mac, that account must be logged in to the GUI (see [macOS workers](#macos-workers)).
 - **GitHub access on each host.** The hosts clone this repo. Check with `ssh <user>@<ip> git ls-remote <repo-url>`.
 - **The CLI on the admin machine.** In a checkout of this repo: `./scripts/install-cli.sh`. The CLI runs from that checkout, and it sends the setup scripts in `deploy/bootstrap/` from it.
@@ -93,13 +93,15 @@ In each repo: `testbox init` writes a `testbox.yml` for what it finds (Node, Gra
 
 ## Access from outside the LAN
 
-Use [Twingate](https://www.twingate.com/). Put a connector on a host in the LAN (the control-plane host is a good place). Then make these resources, by IP address:
+Use a VPN that can reach the LAN, for example [Twingate](https://www.twingate.com/), Tailscale, or WireGuard. It must give access to these addresses, by IP:
 
-| Resource | Ports | Who uses it |
+| Address | Ports | Who uses it |
 | --- | --- | --- |
 | control-plane IP | 3000 | the CLI (API and live logs) |
 | control-plane IP | 22 | the admin machine (`testbox admin`) |
 | each worker IP | 22 | the CLI (file sync and snapshot) |
+
+With Twingate, put a connector on a host in the LAN (the control-plane host is a good place) and make one resource for each row.
 
 Do not add Redis (6379): only workers use it, and they are on the LAN.
 

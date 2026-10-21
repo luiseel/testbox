@@ -40,7 +40,7 @@ testbox admin add-user <name>
 testbox setup --api-url http://<control-plane-ip>:3000 --token <token>
 ```
 
-[docs/setup.md](docs/setup.md) has the details: what each command does, the few steps it cannot do for you (Xcode, a GUI login, the macOS Local Network permission), access from outside the LAN with Twingate, and updates.
+[docs/setup.md](docs/setup.md) has the details: what each command does, the few steps it cannot do for you (Xcode, a GUI login, the macOS Local Network permission), access from outside the LAN, and updates.
 
 ## Use
 

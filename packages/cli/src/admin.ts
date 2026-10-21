@@ -85,7 +85,7 @@ export class AdminApp {
     try {
       const address = flags.address ?? ipFromSshHost(sshHost);
       if (!address) {
-        output.error(`pass --address <LAN IP of ${sshHost}>; workers and Twingate need an IP, not a .local name`);
+        output.error(`pass --address <LAN IP of ${sshHost}>; workers and VPNs need an IP, not a .local name`);
         return ExitCode.JobFailed;
       }
       const repoDir = flags.repoDir ?? DEFAULT_REPO_DIR;
