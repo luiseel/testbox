@@ -78,12 +78,12 @@ export class JobsService {
   async registerSnapshot(
     workspaceId: string,
     ownerId: string,
-    input: { id: string; digest: string },
+    input: { id: string; digest: string; workDir?: string },
   ): Promise<SnapshotRecord> {
     const workspace = await this.getWorkspace(workspaceId, ownerId);
     const existing = await this.store.getSnapshot(input.id);
     if (existing) {
-      if (existing.ownerId !== ownerId || existing.digest !== input.digest) {
+      if (existing.ownerId !== ownerId || existing.digest !== input.digest || existing.workDir !== input.workDir) {
         throw new AppError('CONFLICT', 'snapshot id already used', 409);
       }
       return existing;
@@ -94,6 +94,7 @@ export class JobsService {
       ownerId,
       relPath: snapshotRel(input.id),
       digest: input.digest,
+      workDir: input.workDir,
       createdAt: Date.now(),
     };
     await this.store.createSnapshot(snapshot);
@@ -249,6 +250,7 @@ export class JobsService {
       snapshotId: snapshot.id,
       snapshotRelPath: snapshot.relPath,
       snapshotDigest: snapshot.digest,
+      snapshotWorkDir: snapshot.workDir ?? null,
       ownerId,
       command: body.command,
       profile: body.profile,

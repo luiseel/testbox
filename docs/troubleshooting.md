@@ -30,6 +30,9 @@ The worker log is `~/testbox/logs/worker.stderr.log` on a Mac, and `journalctl -
 | `swift build` or `swift test` prints nothing and never ends on a Mac worker. | Swift Build hangs in a LaunchAgent session. | Use `swift test --build-system native` (`testbox init` writes this). |
 | A job tests files from another checkout, or old files. | A stale sync, or two syncs to the same worker folder (for example `testbox start` in two checkouts of one project). | `testbox doctor` names them. Then `testbox prune`, or `testbox stop` in the checkout you do not use. |
 | The last log lines look missing when you pipe `verify … 2>&1`. | The job's stdout and stderr are two streams; through one pipe they can arrive out of order. | Nothing is lost. Use `--json` for one ordered stream. |
+| The CLI was killed by a tool timeout (for example a Bash call that ends at 600 s). | The tool sent SIGTERM or SIGHUP. The CLI detaches; it does not cancel the job. | The job continues. The summary has `state` `detached` and the job id. Run `testbox logs <job-id> --follow` or `testbox status <job-id>`. Next time, run `verify` in the background or with `--detach`. |
+| `verify` exits 10: `flock is missing`. | `verify` locks each checkout while its sync is paused, and this machine has no `flock`. | macOS: `brew install flock`. Linux: install `util-linux`. |
+| `verify` exits 10: `another testbox run holds .testbox/snapshot.lock`. | Another `verify` on this machine snapshots the same checkout (for example a link of both) and took longer than 15 minutes. | Wait for it, or cancel it. |
 | `verify` exits 12 with `lease_expired`. | The worker stopped or lost Redis during the job. | `testbox doctor`, then run the job again. |
 | `verify` exits 20. | Your token is wrong or was replaced. | Ask an admin: `testbox admin add-user <your name>` prints a new `testbox setup` line. |
 

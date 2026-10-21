@@ -53,7 +53,7 @@ It does these steps:
 
 Options: `--id <id>` (default `<short hostname>-1`, lower case), `--labels gpu,big-disk` (extra labels), `--capacity <n>` (jobs at the same time, default 1), `--address`, `--ref`, `--git-url`, `--repo-dir`, `--data-dir`, `--wait <seconds>` (for the first heartbeat, default 600), `--no-smoke`. When you are not logged in to this control plane, it skips the test job.
 
-The worker finds its own labels: the OS (`macos` or `linux`), the arch, `node`, `pnpm`, `mise`, `browser`, `worker:<id>`, and on a Mac `xcode`, `xcode-<version>`, and `ios-simulator` (see [Labels](reference.md#labels)).
+The worker finds its own labels: the OS (`macos` or `linux`), the arch, `node`, `pnpm`, `mise`, `xcodegen`, `docker`, `browser`, `worker:<id>`, and on a Mac `xcode`, `xcode-<version>`, and `ios-simulator` (see [Labels](reference.md#labels)).
 
 ### macOS workers
 
@@ -81,7 +81,7 @@ It prints one line. Send it to that person over a private channel. On their mach
 testbox setup --api-url http://<control-plane-ip>:3000 --token <token>
 ```
 
-`setup` installs Mutagen with Homebrew when it is missing, logs in, makes an SSH key when there is none, and runs `testbox doctor`. The first time, `doctor` shows that the workers refuse the new key, and prints a line like this:
+`setup` installs Mutagen (and `flock`, which `verify` uses to lock a checkout while its sync is paused) with Homebrew when they are missing, logs in, makes an SSH key when there is none, and runs `testbox doctor`. The first time, `doctor` shows that the workers refuse the new key, and prints a line like this:
 
 ```
 fix: send this to an admin: testbox admin authorize 'ssh-ed25519 AAAA… ana@laptop'

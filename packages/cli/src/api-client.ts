@@ -37,9 +37,16 @@ export class HttpApi {
     return `${this.baseUrl.replace(/\/$/, '')}${path}`;
   }
 
-  private async request<T>(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<T> {
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    headers?: Record<string, string>,
+    signal?: AbortSignal,
+  ): Promise<T> {
     const response = await this.fetchImpl(this.url(path), {
       method,
+      signal,
       headers: {
         authorization: `Bearer ${this.token}`,
         accept: 'application/json',
@@ -104,7 +111,10 @@ export class HttpApi {
     return this.request('DELETE', `/v1/workspaces/${id}`);
   }
 
-  registerSnapshot(workspaceId: string, snapshot: { id: string; digest: string }): Promise<{ id: string; digest: string; relPath: string }> {
+  registerSnapshot(
+    workspaceId: string,
+    snapshot: { id: string; digest: string; workDir?: string },
+  ): Promise<{ id: string; digest: string; relPath: string; workDir?: string }> {
     return this.request('POST', `/v1/workspaces/${workspaceId}/snapshots`, snapshot);
   }
 
@@ -123,8 +133,9 @@ export class HttpApi {
     return this.request('POST', '/v1/jobs', input);
   }
 
-  getJob(id: string): Promise<{ job: JobPayload }> {
-    return this.request('GET', `/v1/jobs/${id}`);
+  /** `signal` stops the request, for example when the CLI detaches while it waits for the final state. */
+  getJob(id: string, signal?: AbortSignal): Promise<{ job: JobPayload }> {
+    return this.request('GET', `/v1/jobs/${id}`, undefined, undefined, signal);
   }
 
   cancel(id: string): Promise<{ job: JobPayload }> {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { capabilityLabels, detectBrowser, xcodeLabels } from '../src/capabilities';
+import { capabilityLabels, detectBrowser, detectTools, xcodeLabels } from '../src/capabilities';
 import { probeRuntime } from '../src/probe';
 
 describe('worker capabilities', () => {
@@ -10,10 +10,10 @@ describe('worker capabilities', () => {
       xcodeVersion: 'Xcode 16.2',
       iosSimulator: true,
       browser: true,
-      pnpm: true,
+      tools: ['pnpm', 'docker'],
       extra: ['gpu', 'linux'],
     });
-    expect(labels).toEqual(['linux', 'x64', 'node', 'pnpm', 'browser', 'gpu']);
+    expect(labels).toEqual(['linux', 'x64', 'node', 'pnpm', 'docker', 'browser', 'gpu']);
     expect(labels).not.toContain('xcode');
     expect(labels).not.toContain('ios-simulator');
     if (process.platform !== 'darwin') {
@@ -30,9 +30,16 @@ describe('worker capabilities', () => {
       xcodeVersion: 'Xcode 16.2',
       iosSimulator: true,
       browser: false,
-      pnpm: true,
+      tools: ['xcodegen', 'pnpm'],
       extra: ['large-disk'],
     });
-    expect(labels).toEqual(['macos', 'arm64', 'node', 'pnpm', 'xcode', 'xcode-16.2', 'ios-simulator', 'large-disk']);
+    expect(labels).toEqual(['macos', 'arm64', 'node', 'pnpm', 'xcodegen', 'xcode', 'xcode-16.2', 'ios-simulator', 'large-disk']);
+  });
+
+  it('labels the tools it finds on PATH, in a fixed order', async () => {
+    const onPath = new Set(['docker', 'xcodegen', 'mise', 'pnpm']);
+    expect(await detectTools(async (name) => onPath.has(name))).toEqual(['pnpm', 'mise', 'xcodegen', 'docker']);
+    expect(await detectTools(async (name) => name === 'docker')).toEqual(['docker']);
+    expect(await detectTools(async () => false)).toEqual([]);
   });
 });

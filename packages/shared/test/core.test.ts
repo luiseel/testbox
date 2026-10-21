@@ -5,6 +5,7 @@ import path from 'path';
 import { promisify } from 'util';
 import { describe, expect, it } from 'vitest';
 import {
+  ConfigError,
   IllegalTransitionError,
   assertTransition,
   buildFingerprint,
@@ -184,6 +185,21 @@ profiles:
     expect(aliased.profiles.ios.requires).toEqual(['macos', 'xcode']);
   });
 
+  it('parses links as safe names, default none, and rejects a bad, repeated, or project name', () => {
+    const config = parseTestboxConfig('project: interface\nprofiles:\n  unit:\n    cmd: make\n  ios:\n    cmd: xcodebuild\n    links: [api, shared.kit]\n');
+    expect(config.profiles.unit.links).toEqual([]);
+    expect(config.profiles.ios.links).toEqual(['api', 'shared.kit']);
+    const bad = (links: string) => () => parseTestboxConfig(`project: interface\nprofiles:\n  ios:\n    cmd: x\n    links: ${links}\n`);
+    expect(bad('[../api]')).toThrow(ConfigError);
+    expect(bad('[../api]')).toThrow('a link name must match');
+    expect(bad('[api, api]')).toThrow('a link name is listed twice');
+    expect(bad('[api, API]')).toThrow('a link name is listed twice');
+    expect(bad('[Interface]')).toThrow('a link cannot have the project name interface');
+    expect(bad('[interface]')).toThrow('a link cannot have the project name interface');
+    const many = `[${Array.from({ length: 21 }, (_, i) => `l${i}`).join(', ')}]`;
+    expect(bad(many)).toThrow('a profile can have at most 20 links');
+  });
+
   it('parses worker capacity, ssh host, and extra labels', () => {
     const config = parseWorkerConfig(`
 capacity: 2
@@ -217,6 +233,18 @@ describe('job source', () => {
     [{ path: '/Users/ana/code/app', commit: '3edf65d' }, 'source: /Users/ana/code/app 3edf65d'],
     [{ path: '/Users/ana/code/app' }, 'source: /Users/ana/code/app'],
     [{ path: '/Users/ana/code/app\nfake: line', branch: 'main\x1b[31m' }, 'source: /Users/ana/code/app fake: line main [31m'],
+    [
+      {
+        path: '/code/interface_TGN-821',
+        branch: 'TGN-821',
+        commit: '3edf65d',
+        links: [
+          { name: 'api', path: '/code/api_TGN-821', branch: 'TGN-821', commit: '91ab2c0', dirty: true },
+          { name: 'kit', path: '/code/kit' },
+        ],
+      },
+      'source: /code/interface_TGN-821 TGN-821@3edf65d +api:TGN-821@91ab2c0(dirty) +kit',
+    ],
   ])('formats %j as one log line', (source, line) => {
     expect(formatJobSource(source)).toBe(line);
   });

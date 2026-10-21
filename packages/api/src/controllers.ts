@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Headers, Inject, Param, Post, Query, Req, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { z } from 'zod';
-import { AppError, isTerminal, JOB_SOURCE_MAX_LENGTH, JobStore, type JobRecord } from '@testbox/shared';
+import { AppError, isTerminal, JOB_SOURCE_MAX_LENGTH, JOB_SOURCE_MAX_LINKS, JobStore, SAFE_SEGMENT, type JobRecord } from '@testbox/shared';
 import { listArtifactFiles, openArtifact, readRequestBody, saveArtifact } from './artifacts';
 import { AuthService } from './auth.service';
 import { AuthedRequest, Public, Roles } from './auth.guard';
@@ -22,6 +22,14 @@ function parse<T>(schema: z.ZodType<T>, value: unknown): T {
   return result.data;
 }
 
+/** One checkout in a job source (the main one, or a link): the same fields for both. */
+const checkoutSourceFields = {
+  path: z.string().min(1).max(JOB_SOURCE_MAX_LENGTH),
+  branch: z.string().max(JOB_SOURCE_MAX_LENGTH).optional(),
+  commit: z.string().max(JOB_SOURCE_MAX_LENGTH).optional(),
+  dirty: z.boolean().optional(),
+};
+
 function publicJob(job: JobRecord): Omit<JobRecord, 'queueKey'> {
   return {
     id: job.id,
@@ -29,6 +37,7 @@ function publicJob(job: JobRecord): Omit<JobRecord, 'queueKey'> {
     snapshotId: job.snapshotId,
     snapshotRelPath: job.snapshotRelPath,
     snapshotDigest: job.snapshotDigest,
+    snapshotWorkDir: job.snapshotWorkDir,
     ownerId: job.ownerId,
     command: job.command,
     profile: job.profile,
@@ -132,6 +141,7 @@ export class WorkspacesController {
       z.object({
         id: z.string().regex(/^snap_[a-f0-9]{24}$/),
         digest: z.string().regex(/^[a-f0-9]{64}$/),
+        workDir: z.string().regex(SAFE_SEGMENT).optional(),
       }),
       body,
     );
@@ -168,10 +178,11 @@ export class JobsController {
         idempotencyKey: z.string().min(8).max(200).optional(),
         source: z
           .object({
-            path: z.string().min(1).max(JOB_SOURCE_MAX_LENGTH),
-            branch: z.string().max(JOB_SOURCE_MAX_LENGTH).optional(),
-            commit: z.string().max(JOB_SOURCE_MAX_LENGTH).optional(),
-            dirty: z.boolean().optional(),
+            ...checkoutSourceFields,
+            links: z
+              .array(z.object({ name: z.string().regex(SAFE_SEGMENT), ...checkoutSourceFields }))
+              .max(JOB_SOURCE_MAX_LINKS)
+              .optional(),
           })
           .optional(),
       }),

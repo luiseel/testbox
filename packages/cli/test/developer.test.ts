@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
@@ -73,7 +73,11 @@ describe('testbox doctor', () => {
     await writeUserConfig(home, { apiUrl: 'http://10.0.0.5:3000', token: 'tok', remoteRoot: '~/testbox' });
     await mkdir(path.join(home, '.ssh'));
     await writeFile(path.join(home, '.ssh', 'id_ed25519.pub'), 'ssh-ed25519 AAAAkey me@laptop\n');
-    await writeFile(path.join(home, 'testbox.yml'), 'project: demo\nprofiles:\n  ios:\n    cmd: xcodebuild test\n    requires: [xcode]\n  unit:\n    cmd: make\n');
+    const repo = path.join(home, 'demo');
+    await mkdir(repo);
+    await writeFile(path.join(repo, 'testbox.yml'), 'project: demo\nprofiles:\n  ios:\n    cmd: xcodebuild test\n    requires: [xcode]\n    links: [api, web]\n  unit:\n    cmd: make\n');
+    await mkdir(path.join(home, 'api'));
+    await writeFile(path.join(home, 'api', 'testbox.yml'), 'project: api\n');
     const remote: RemoteRunner = {
       async run(file, args): Promise<CommandResult> {
         if (file === 'mutagen') return { code: 0, stdout: args[1] === 'list' ? '[]' : 'v0.18', stderr: '' };
@@ -97,7 +101,7 @@ describe('testbox doctor', () => {
       return new Response('{}', { status: 404 });
     }) as typeof fetch;
     try {
-      expect(await runCli(['doctor'], io(home, home, remote, fetchImpl, out))).toBe(1);
+      expect(await runCli(['doctor'], io(home, repo, remote, fetchImpl, out))).toBe(1);
       const text = out.join('');
       expect(text).toContain('✓ logged in as ana');
       expect(text).toContain('✓ no stale syncs');
@@ -108,6 +112,16 @@ describe('testbox doctor', () => {
       expect(text).toContain('✗ profile ios (requires xcode)');
       expect(text).toContain('only mac-1 can run it, and it is down');
       expect(text).toContain('✓ profile unit');
+      expect(text).toContain(`✓ link api of ios: ${path.join(home, 'api')}`);
+      expect(text).toContain('✗ link web of ios: no checkout at ../web\n    fix: pass --link web=<path>, or clone it next to this checkout');
+
+      // Two links to one checkout (here through a symlink): verify rejects it, so doctor must say so.
+      await symlink(path.join(home, 'api'), path.join(home, 'web'));
+      out.length = 0;
+      expect(await runCli(['doctor'], io(home, repo, remote, fetchImpl, out))).toBe(1);
+      expect(out.join('')).toContain(
+        `✗ link web of ios: ${path.join(home, 'web')} is the same checkout as link api\n    fix: give link web its own checkout (--link web=<path>), or remove it from the profile`,
+      );
     } finally {
       await rm(home, { recursive: true, force: true });
     }

@@ -1,6 +1,8 @@
 import path from 'path';
 
-const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/;
+/** A name that is safe as one path segment: a project, a link, an id. */
+export const SAFE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/;
+const SEGMENT = SAFE_SEGMENT;
 
 export function assertSafeSegment(value: string, label = 'segment'): void {
   if (!SEGMENT.test(value)) {

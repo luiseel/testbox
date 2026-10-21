@@ -168,6 +168,73 @@ describe('queue and execution', () => {
     expect(events).toBeDefined();
   });
 
+  it('runs a job with links in its work dir, next to the linked tree, and keeps the work dir and links', async () => {
+    const ctx = await boot();
+    open.push(ctx);
+    const alice = await user(ctx, 'alice');
+    const ws = await call(ctx, alice.token, 'POST', '/v1/workspaces', { project: 'interface' });
+    const api = await call(ctx, alice.token, 'POST', '/v1/workspaces', { project: 'api' });
+    await mkdir(path.join(ctx.dataDir, ws.json.stagingRel), { recursive: true });
+    await writeFile(path.join(ctx.dataDir, ws.json.stagingRel, 'app.txt'), 'app\n');
+    await mkdir(path.join(ctx.dataDir, api.json.stagingRel, 'client'), { recursive: true });
+    await writeFile(path.join(ctx.dataDir, api.json.stagingRel, 'client', 'Package.swift'), 'linked\n');
+    const snapshotId = createId('snap');
+    const snap = await createSnapshot({
+      dataDir: ctx.dataDir,
+      stagingRel: ws.json.stagingRel,
+      snapshotId,
+      ignore: [],
+      retentionMs: 60_000,
+      workDir: 'interface',
+      links: [{ name: 'api', stagingRel: api.json.stagingRel, ignore: [] }],
+    });
+    const bad = await call(ctx, alice.token, 'POST', `/v1/workspaces/${ws.json.id}/snapshots`, { id: snapshotId, digest: snap.digest, workDir: '../x' });
+    expect(bad.status).toBe(400);
+    const registered = await call(ctx, alice.token, 'POST', `/v1/workspaces/${ws.json.id}/snapshots`, {
+      id: snapshotId,
+      digest: snap.digest,
+      workDir: snap.workDir,
+    });
+    expect(registered.status).toBe(201);
+    const source = {
+      path: '/code/interface_TGN-821',
+      branch: 'TGN-821',
+      links: [{ name: 'api', path: '/code/api_TGN-821', branch: 'TGN-821', commit: '91ab2c0', dirty: true }],
+    };
+    const badSource = await call(ctx, alice.token, 'POST', '/v1/jobs', {
+      workspaceId: ws.json.id,
+      snapshotId,
+      command: 'true',
+      source: { path: '/code/x', links: [{ name: '../api', path: '/code/api' }] },
+    });
+    expect(badSource.status).toBe(400);
+    const created = await call(ctx, alice.token, 'POST', '/v1/jobs', {
+      workspaceId: ws.json.id,
+      snapshotId,
+      command: 'cat app.txt ../api/client/Package.swift',
+      artifactGlobs: ['app.txt'],
+      source,
+    });
+    expect(created.status).toBe(201);
+    expect(created.json.job).toMatchObject({ snapshotWorkDir: 'interface', source });
+    await ctx.daemon?.startProcessing();
+    const job = await waitJob(ctx, alice.token, created.json.job.id);
+    expect(job.state).toBe('succeeded');
+    const logs = await call(ctx, alice.token, 'GET', `/v1/jobs/${job.id}/logs`);
+    const lines = (logs.json.lines as { line: string }[]).map((entry) => entry.line);
+    expect(lines[0]).toBe('source: /code/interface_TGN-821 TGN-821 +api:TGN-821@91ab2c0(dirty)');
+    expect(lines).toEqual(expect.arrayContaining(['app', 'linked']));
+    const artifacts = await call(ctx, alice.token, 'GET', `/v1/jobs/${job.id}/artifacts`);
+    expect(artifacts.json.files.map((file: { path: string }) => file.path)).toEqual(['app.txt']);
+
+    // The digest covers the linked tree too: a change there after the register fails the next job.
+    await writeFile(path.join(ctx.dataDir, snap.relPath, 'api', 'client', 'Package.swift'), 'changed\n');
+    const again = await call(ctx, alice.token, 'POST', '/v1/jobs', { workspaceId: ws.json.id, snapshotId, command: 'true' });
+    expect(again.status).toBe(201);
+    const failed = await waitJob(ctx, alice.token, again.json.job.id);
+    expect(failed).toMatchObject({ state: 'failed', error: 'snapshot digest mismatch' });
+  });
+
   it('fails a job whose snapshot changed after submission and does not run it', async () => {
     const ctx = await boot();
     open.push(ctx);
