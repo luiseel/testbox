@@ -121,9 +121,11 @@ A worker is healthy while its heartbeat is newer than 15 s (`TESTBOX_HEARTBEAT_T
 - has every required label
 - has a free slot (`TESTBOX_CAPACITY`, default 1)
 
-When several workers qualify, the one that last ran this workspace wins, so its warm caches are used. Higher priority runs first; equal priority is first in, first out.
+When several workers qualify, the one that last ran this workspace wins while it has a free slot. Its caches are warm. Otherwise the worker with the most free slots wins. Queued jobs that wait for a worker use its slots. On a tie, the worker that was idle longest wins. Thus equal workers take turns. Higher priority runs first; equal priority is first in, first out.
 
-Before it submits, `verify` asks the API for a worker. If no healthy worker has the labels, the submit fails at once (exit 11). After the submit, the job is pinned to that worker; when the worker is busy, the job waits.
+Before it submits, `verify` asks the API for a worker. If no healthy worker has the labels, the submit fails at once (exit 11). When the warm worker is full, the tree syncs to the worker with the most free slots. When they have the same number, the warm worker is used. After the submit, the job is pinned to that worker; when the worker is busy, the job waits.
+
+To let a job use all your workers, require only the labels it needs. For example, `requires: [mise]` runs on Linux and macOS; `requires: [linux, mise]` runs on Linux only.
 
 Latest wins: a newer queued job for the same user, workspace, and profile cancels the older queued one. This applies only to jobs with a profile; `run "<command>"` jobs without `--profile` do not cancel each other. A `run "<command>" --profile NAME` job and a `verify NAME` job have the same profile, so the newer one cancels the older one while it is queued. A running job is never cancelled by a newer submit.
 

@@ -7,6 +7,10 @@ export interface PlacementWorker {
   capacity: number;
   lastSeen: number;
   active: number;
+  /** Queued jobs pinned to this worker: the CLI synced them there, so they wait for its slot. */
+  waiting: number;
+  /** When this worker last got or ended a job; 0 when no job record is left. */
+  lastJobAt: number;
   sshHost: string | null;
 }
 
@@ -44,20 +48,35 @@ export function rankQueuedJobs<T extends { priority: number; createdAt: number; 
   );
 }
 
-export function toPlacementWorkers(workers: readonly WorkerRecord[], active: readonly JobRecord[]): PlacementWorker[] {
+export function toPlacementWorkers(workers: readonly WorkerRecord[], jobs: readonly JobRecord[]): PlacementWorker[] {
   return workers.map((worker) => {
-    const mine = active.filter(
-      (job) => job.workerId === worker.id && (job.state === 'assigned' || job.state === 'running'),
-    );
+    const mine = jobs.filter((job) => job.workerId === worker.id);
+    const waiting = jobs.filter((job) => job.state === 'queued' && job.targetWorkerId === worker.id);
     return {
       id: worker.id,
       labels: worker.labels,
       capacity: worker.capacity > 0 ? worker.capacity : 1,
       lastSeen: worker.lastSeen,
-      active: mine.length,
+      active: mine.filter((job) => job.state === 'assigned' || job.state === 'running').length,
+      waiting: waiting.length,
+      lastJobAt: Math.max(0, ...mine.map((job) => Math.max(job.assignedAt ?? 0, job.endedAt ?? 0))),
       sshHost: worker.sshHost ?? null,
     };
   });
+}
+
+/** Slots left after the active jobs and the jobs that wait for this worker. Below 0 when jobs wait. */
+function freeSlots(worker: PlacementWorker): number {
+  return worker.capacity - worker.active - worker.waiting;
+}
+
+/** Most free slots first, then the worker that was idle longest, so equal workers take turns. */
+function leastLoaded(workers: readonly PlacementWorker[]): PlacementWorker | null {
+  return (
+    [...workers].sort(
+      (a, b) => freeSlots(b) - freeSlots(a) || a.lastJobAt - b.lastJobAt || a.id.localeCompare(b.id),
+    )[0] ?? null
+  );
 }
 
 export function workerIsHealthy(worker: PlacementWorker, now: number, heartbeatTtlMs: number): boolean {
@@ -94,12 +113,13 @@ export function chooseWorker(
     const preferred = eligible.find((worker) => worker.id === affinityId);
     if (preferred) return preferred;
   }
-  return [...eligible].sort((a, b) => a.active - b.active || a.id.localeCompare(b.id))[0] ?? null;
+  return leastLoaded(eligible);
 }
 
 /**
- * Worker the CLI should sync to. Capacity is ignored so a busy affinity
- * worker can still receive the staging tree; the job waits for a free slot.
+ * Worker the CLI should sync to. The warm worker wins while it has a free slot.
+ * Otherwise the least-loaded worker with the labels wins; the warm worker wins a tie.
+ * Jobs that already wait for a worker count as its load.
  */
 export function chooseSyncTarget(
   job: PlacementRequest,
@@ -112,11 +132,11 @@ export function chooseSyncTarget(
     (worker) => workerIsHealthy(worker, now, heartbeatTtlMs) && labelsSatisfy(worker.labels, job.requires),
   );
   if (eligible.length === 0) return null;
-  if (affinityId) {
-    const preferred = eligible.find((worker) => worker.id === affinityId);
-    if (preferred) return preferred;
-  }
-  return [...eligible].sort((a, b) => a.active - b.active || a.id.localeCompare(b.id))[0] ?? null;
+  const preferred = affinityId ? eligible.find((worker) => worker.id === affinityId) : undefined;
+  if (preferred && freeSlots(preferred) > 0) return preferred;
+  const best = leastLoaded(eligible);
+  if (preferred && best && freeSlots(best) <= freeSlots(preferred)) return preferred;
+  return best;
 }
 
 /**
@@ -133,8 +153,7 @@ export async function claimNextJob(
   return store.withLock('scheduler', async () => {
     const workers = await store.listWorkers();
     const records = await store.listAllJobs();
-    const active = records.filter((job) => job.state === 'assigned' || job.state === 'running');
-    const placement = toPlacementWorkers(workers, active);
+    const placement = toPlacementWorkers(workers, records);
     const me = placement.find((worker) => worker.id === workerId);
     if (!me || !workerIsHealthy(me, now, heartbeatTtlMs)) return null;
     if (me.active >= me.capacity) return null;

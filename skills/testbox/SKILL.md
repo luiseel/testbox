@@ -64,7 +64,7 @@ profiles:
     links: [api]                # the sibling checkout ../api, uncommitted changes too
 ```
 
-Labels a worker finds itself: `macos` / `linux`, `arm64` / `x64`, `node`, `pnpm`, `mise`, `xcodegen`, `docker`, `browser`, `xcode`, `xcode-<version>`, `ios-simulator`, `worker:<id>`. Use labels; never name a host.
+Labels a worker finds itself: `macos` / `linux`, `arm64` / `x64`, `node`, `pnpm`, `mise`, `xcodegen`, `docker`, `browser`, `xcode`, `xcode-<version>`, `ios-simulator`, `worker:<id>`. Use labels; never name a host. Require only what the job needs: each extra label (for example `linux`) removes workers, and the jobs then wait for the remaining ones. Jobs go to the worker that ran this checkout last while it is free; otherwise to the least busy worker with the labels.
 
 Rules for good profiles:
 - The worker environment is minimal: only `PATH`, `HOME`, and a few system variables. Local env vars and `.env` files are not there.

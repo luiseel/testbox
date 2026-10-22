@@ -194,13 +194,11 @@ export class JobsService {
     const impossible = explainUnsatisfiable(requires, workers);
     if (impossible) throw new AppError('NO_WORKER', impossible, 503);
     const now = Date.now();
-    const active = (await this.store.listAllJobs()).filter(
-      (job) => job.state === 'assigned' || job.state === 'running',
-    );
+    const jobs = await this.store.listAllJobs();
     const affinity = input.workspaceId ? await this.store.getWorkspaceAffinity(input.workspaceId) : null;
     const chosen = chooseSyncTarget(
       { requires },
-      toPlacementWorkers(workers, active),
+      toPlacementWorkers(workers, jobs),
       affinity,
       now,
       this.options.heartbeatTtlMs,
