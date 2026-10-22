@@ -1,11 +1,11 @@
 ---
 name: testbox
-description: Run builds and tests on remote Testbox workers instead of the local machine. Use when a repo has a testbox.yml, when the user asks to verify, build, or test "on testbox" or "on a worker", when a test needs macOS, Xcode, an iOS simulator, or a browser the local machine lacks, or when the user wants to write or edit testbox.yml.
+description: Run builds and tests on a self-hosted Testbox worker instead of the local machine. The output is JSON made for agents, with an exit code and a hint on every run. Use when a repo has a testbox.yml, when the user asks to verify, build, or test "on testbox" or "on a worker", when a test needs macOS, Xcode, an iOS simulator, or a browser the local machine lacks, or when the user wants to write or edit testbox.yml.
 ---
 
 # Testbox
 
-Testbox copies the local tree (uncommitted changes too) to a worker, runs a command there, and streams the log back. `testbox.yml` in the repo root (or a parent) defines named profiles.
+Testbox copies the local tree (uncommitted changes too) to a worker you own, runs a command there on a frozen copy, and returns the log, an exit code, and a hint. The copy is one-way. `testbox.yml` in the repo root (or a parent) defines named profiles.
 
 ## Before you run anything
 

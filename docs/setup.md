@@ -1,5 +1,7 @@
 # Setup
 
+Testbox needs at least one control plane and one worker. They can be the same host: run both `admin` commands against it.
+
 You set up three kinds of machine, in this order:
 
 1. **The control plane**: one host that runs the API and Redis in Docker.

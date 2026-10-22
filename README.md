@@ -1,6 +1,10 @@
 # Testbox
 
-Self-hosted pre-CI. You edit on your machine, also uncommitted work. `testbox verify <profile>` copies that tree to a worker (macOS or Linux), runs the build or the tests there, and streams the log back to your terminal.
+A self-hosted machine for coding agents to run builds and tests on. The agent (or you) runs `testbox verify <profile>`. The CLI copies the working tree, uncommitted changes included, to a worker you own (macOS or Linux), runs the command there, and returns the log, an exit code, and a hint. With `--json`, all of it is one machine-readable stream.
+
+The copy is one-way. The job runs on a frozen snapshot, so you can keep editing. Only the log and the artifacts you ask for come back.
+
+One worker is enough. The control plane, labels, and scheduling below are for a team with more than one machine.
 
 ```
 your machine                           control plane (one host, Docker)
@@ -19,6 +23,10 @@ your machine                           control plane (one host, Docker)
 Each checkout of a repo (also a git worktree) syncs into its own folder on the worker: `~/testbox/workspaces/<user>/<project>/<workspace id>`. Old flat folders (`workspaces/<user>/<project>`) stay on the worker until you remove them.
 
 The control plane decides; it does not run code. Workers connect out to Redis and the API and pull the jobs that match their labels. Only SSH comes in to a worker, for the file sync.
+
+## Use from an agent
+
+Install the skill: `npx skills add luiseel/testbox`. Works with Claude Code and other agents that read skills. The agent then runs `testbox verify <profile> --json --quiet`: one NDJSON stream that ends with a summary line (`exit`, `hint`, `logFile`), the full log in `.testbox/logs/<job-id>.log`, and exit 2 when the call itself is wrong. [docs/reference.md](docs/reference.md#output-with---json) lists the events.
 
 ## Set up
 
@@ -64,8 +72,6 @@ profiles:
     command: xcodebuild test -scheme App -destination 'platform=iOS Simulator,name=iPhone 16'
     requires: [macos, xcode]
 ```
-
-For coding agents (Claude Code and others), install the skill: `npx skills add luiseel/testbox`. Agents run `testbox verify <profile> --json --quiet`: one NDJSON stream that ends with a summary line (`exit`, `hint`, `logFile`), the full log in `.testbox/logs/<job-id>.log`, and exit 2 when the call itself is wrong. [docs/reference.md](docs/reference.md#output-with---json) lists the events.
 
 `requires` lists worker labels. Labels pick the machine; you never name a host. `worker:<id>` targets one worker.
 

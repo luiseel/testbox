@@ -1,5 +1,5 @@
 [Unit]
-Description=Testbox worker
+Description=Testbox worker: runs builds and tests sent by the testbox CLI
 After=network-online.target
 Wants=network-online.target
 

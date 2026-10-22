@@ -2,7 +2,7 @@
   "name": "testbox",
   "private": true,
   "version": "0.1.0",
-  "description": "Self-hosted pre-CI remote execution for trusted builds and tests.",
+  "description": "A self-hosted machine for coding agents to run builds and tests on. Copies the working tree to a worker, runs a command, returns log, exit code, and hint as JSON.",
   "packageManager": "pnpm@10.33.4",
   "engines": {
     "node": "22.x"
