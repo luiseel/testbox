@@ -14,6 +14,7 @@ The `testbox admin` commands do steps 1 and 2 over SSH from one machine, the *ad
 - **SSH from the admin machine.** Your SSH key must open each host without a password: `ssh <user>@<ip> true`. Use one account per host for testbox. On a Mac, that account must be logged in to the GUI (see [macOS workers](#macos-workers)).
 - **GitHub access on each host.** The hosts clone this repo. Check with `ssh <user>@<ip> git ls-remote <repo-url>`.
 - **The CLI on the admin machine.** In a checkout of this repo: `./scripts/install-cli.sh`. The CLI runs from that checkout, and it sends the setup scripts in `deploy/bootstrap/` from it.
+- **Apple Silicon or Linux on every host.** The build uses `tsrs`, which has binaries for macOS arm64 and Linux x64 and arm64. An Intel Mac cannot build the CLI or run as a worker.
 
 The commands install missing packages without a prompt: Homebrew on macOS, and `pacman`, `apt-get`, or `dnf` on Linux. On Linux that needs passwordless `sudo`. Without it, the command stops and names the packages to install.
 

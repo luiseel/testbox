@@ -8,8 +8,8 @@
     "node": "22.x"
   },
   "scripts": {
-    "build": "tsc -b",
-    "typecheck": "tsc -b --pretty false",
+    "build": "tsrs -b",
+    "typecheck": "tsrs -b --pretty false",
     "test": "bash scripts/test.sh",
     "lint": "eslint .",
     "start:api": "node packages/api/dist/main.js",
@@ -17,6 +17,7 @@
   },
   "devDependencies": {
     "eslint": "^9.14.0",
+    "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "typescript": "^5.6.3",
     "typescript-eslint": "^8.14.0"
   },
