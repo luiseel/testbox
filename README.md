@@ -1,10 +1,10 @@
 # Testbox
 
-A self-hosted machine for coding agents to run builds and tests on. The agent (or you) runs `testbox verify <profile>`. The CLI copies the working tree, uncommitted changes included, to a worker you own (macOS or Linux), runs the command there, and returns the log, an exit code, and a hint. With `--json`, all of it is one machine-readable stream.
+A self-hosted machine for coding agents to run builds and tests on. The agent (or you) runs `testbox verify <profile>`. The CLI copies the working tree, uncommitted changes included, to a worker you own (macOS or Linux), runs the command there, and returns the log and an exit code, with a hint when the run fails. With `--json`, all of it is one NDJSON stream.
 
 The copy is one-way. The job runs on a frozen snapshot, so you can keep editing. Only the log and the artifacts you ask for come back.
 
-One worker is enough. The control plane, labels, and scheduling below are for a team with more than one machine.
+The smallest setup is one control plane and one worker, on one host if you want. Labels and scheduling matter when you add more workers.
 
 ```
 your machine                           control plane (one host, Docker)
