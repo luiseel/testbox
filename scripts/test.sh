@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run every test suite against a Redis of its own.
 #
-# The shared and api suites need Redis. This script finds one in this order:
+# The shared, worker and api suites need Redis. This script finds one in this order:
 #   1. TESTBOX_TEST_REDIS_URL is set: use it as it is.
 #   2. redis-server is on PATH: start one on a free port, stop it at the end.
 #   3. docker is on PATH: run redis:7 on a random host port, remove it at the end.
@@ -9,11 +9,17 @@
 # so a Redis of another project on this machine is never touched.
 #
 # The snapshot tests also need `flock` and `rsync` (macOS: brew install flock).
+#
+# TESTBOX_TEST_PACKAGES limits the run to some packages, for example "worker".
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 run_tests() {
-  pnpm -r --filter @testbox/shared --filter @testbox/worker --filter @testbox/api --filter @testbox/cli run test "$@"
+  local filters=()
+  for name in ${TESTBOX_TEST_PACKAGES:-shared worker api cli}; do
+    filters+=(--filter "@testbox/$name")
+  done
+  pnpm -r "${filters[@]}" run test "$@"
 }
 
 wait_for_redis() {
