@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, writeFile, mkdir } from 'fs/promises';
+import { mkdtemp, readdir, readFile, readlink, rm, symlink, writeFile, mkdir } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
@@ -240,10 +240,40 @@ describe('dependency cache', () => {
     });
     expect(changed.refreshed).toBe(true);
     expect(installs).toBe(2);
-    expect(await readFile(path.join(cache, 'modules', first.digest, 'marker.txt'), 'utf8')).toContain('install-1');
+    expect(await readFile(path.join(cache, 'module-trees', first.digest, 'node_modules', 'marker.txt'), 'utf8')).toContain('install-1');
     await rm(root, { recursive: true, force: true });
   });
 
+  it('restores the node_modules of each workspace package on a warm run', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'deps-'));
+    const cache = path.join(root, 'cache');
+    const snapshots = [path.join(root, 'a'), path.join(root, 'b')];
+    for (const dir of snapshots) {
+      await mkdir(path.join(dir, 'packages', 'cli'), { recursive: true });
+      await writeFile(path.join(dir, 'package.json'), '{"name":"demo"}\n');
+      await writeFile(path.join(dir, 'pnpm-lock.yaml'), 'lock\n');
+    }
+    // A stale folder that was synced; the warm run must replace it.
+    await mkdir(path.join(snapshots[1], 'packages', 'cli', 'node_modules'), { recursive: true });
+    await writeFile(path.join(snapshots[1], 'packages', 'cli', 'node_modules', 'stale.txt'), 'stale\n');
+    let installs = 0;
+    const install = async (cwd: string) => {
+      installs += 1;
+      await mkdir(path.join(cwd, 'node_modules'), { recursive: true });
+      await mkdir(path.join(cwd, 'packages', 'cli', 'node_modules', '@demo'), { recursive: true });
+      await symlink('../../../shared', path.join(cwd, 'packages', 'cli', 'node_modules', '@demo', 'shared'));
+      return 0;
+    };
+    const run = (snapshotDir: string) =>
+      ensureDependencies({ snapshotDir, cacheDir: cache, workspaceKey: 'ws', fingerprint: buildFp('lock-a'), install });
+    expect((await run(snapshots[0])).refreshed).toBe(true);
+    expect((await run(snapshots[1])).refreshed).toBe(false);
+    expect(installs).toBe(1);
+    const cliModules = path.join(snapshots[1], 'packages', 'cli', 'node_modules');
+    expect(await readlink(path.join(cliModules, '@demo', 'shared'))).toBe('../../../shared');
+    expect(await readdir(cliModules)).toEqual(['@demo']);
+    await rm(root, { recursive: true, force: true });
+  });
 });
 
 function buildFp(lock: string) {
