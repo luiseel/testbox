@@ -1,5 +1,5 @@
 import { execFile as execFileCb } from 'child_process';
-import { access, mkdir, readFile, rm, writeFile } from 'fs/promises';
+import { access, mkdir, readdir, readFile, rm, writeFile } from 'fs/promises';
 import path from 'path';
 import { promisify } from 'util';
 import {
@@ -35,9 +35,32 @@ async function linkTree(src: string, dest: string): Promise<void> {
 }
 
 /**
+ * Every `node_modules` folder under `root`, as paths relative to it. A pnpm
+ * workspace has one in the root and one in each package, which holds the
+ * links to the other packages. It does not look inside a `node_modules`.
+ */
+async function findModuleDirs(root: string, rel = ''): Promise<string[]> {
+  let entries;
+  try {
+    entries = await readdir(path.join(root, rel), { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const found: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name === '.git') continue;
+    const child = path.join(rel, entry.name);
+    if (entry.name === 'node_modules') found.push(child);
+    else found.push(...(await findModuleDirs(root, child)));
+  }
+  return found;
+}
+
+/**
  * Reinstall when the lockfile, Node version, arch, or Xcode version changes.
- * A matching fingerprint hardlinks the warm `node_modules` tree and does not
- * touch the shared pnpm store contents. Old fingerprint directories stay put.
+ * A matching fingerprint hardlinks the warm `node_modules` folders (the root
+ * and each workspace package) and does not touch the shared pnpm store
+ * contents. Old fingerprint directories stay put.
  */
 export async function ensureDependencies(opts: {
   snapshotDir: string;
@@ -55,7 +78,9 @@ export async function ensureDependencies(opts: {
     return { refreshed: false, digest, skipped: true };
   }
   const stampPath = path.join(opts.cacheDir, 'stamps', `${opts.workspaceKey}.json`);
-  const warmModules = path.join(opts.cacheDir, 'modules', digest);
+  // Each fingerprint keeps a tree with the snapshot's `node_modules` folders at
+  // their own paths. `cache/modules` has only the root folder, so it is not used.
+  const warmTree = path.join(opts.cacheDir, 'module-trees', digest);
   const storeDir = path.join(opts.cacheDir, 'pnpm-store');
   await mkdir(storeDir, { recursive: true });
 
@@ -67,30 +92,29 @@ export async function ensureDependencies(opts: {
     previous = null;
   }
 
-  const warm = previous === digest && (await exists(warmModules));
-  const snapshotModules = path.join(opts.snapshotDir, 'node_modules');
+  // Drop any synced or hardlinked folders first: a warm link must not mix with
+  // them, and a refresh must not overwrite the previous fingerprint's cache.
+  for (const rel of await findModuleDirs(opts.snapshotDir)) {
+    await rm(path.join(opts.snapshotDir, rel), { recursive: true, force: true });
+  }
+
+  const warm = previous === digest && (await exists(path.join(warmTree, 'node_modules')));
   if (warm) {
-    await rm(snapshotModules, { recursive: true, force: true });
-    await linkTree(warmModules, snapshotModules);
+    for (const rel of await findModuleDirs(warmTree)) {
+      await linkTree(path.join(warmTree, rel), path.join(opts.snapshotDir, rel));
+    }
     return { refreshed: false, digest, skipped: false };
   }
 
-  // Drop any hardlinked warm tree before installing so a refresh cannot
-  // overwrite the previous fingerprint's cache.
-  await rm(snapshotModules, { recursive: true, force: true });
   const code = await opts.install(opts.snapshotDir, storeDir);
   if (code !== 0) {
     throw new Error(`dependency install failed with exit ${code}`);
   }
-  if (await exists(snapshotModules)) {
-    await mkdir(path.dirname(warmModules), { recursive: true });
-    try {
-      await execFile('rm', ['-rf', warmModules]);
-      await execFile('cp', ['-al', snapshotModules, warmModules]);
-    } catch {
-      const { cp, rm } = await import('fs/promises');
-      await rm(warmModules, { recursive: true, force: true });
-      await cp(snapshotModules, warmModules, { recursive: true });
+  const installed = await findModuleDirs(opts.snapshotDir);
+  if (installed.includes('node_modules')) {
+    await rm(warmTree, { recursive: true, force: true });
+    for (const rel of installed) {
+      await linkTree(path.join(opts.snapshotDir, rel), path.join(warmTree, rel));
     }
   }
   await mkdir(path.dirname(stampPath), { recursive: true });
