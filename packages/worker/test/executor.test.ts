@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile, mkdir } from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildJobEnv } from '../src/env';
 import { collectArtifacts } from '../src/artifacts';
 import { killProcessGroup, processStillOwnsJob, runCommand } from '../src/executor';
@@ -39,16 +39,92 @@ describe('executor', () => {
   it('escalates to SIGKILL when the process ignores SIGTERM', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'exec-'));
     const started = Date.now();
+    // The group leader itself ignores SIGTERM, so only the escalation can end it,
+    // with or without a job id in the environment.
     const result = await runCommand({
       cwd: dir,
-      env: process.env,
+      env: envWithoutJob(),
       timeoutMs: 300,
       graceMs: 200,
-      shell: { command: `node -e 'process.on("SIGTERM",()=>{}); setInterval(()=>{},1000)'` },
+      shell: { command: `trap '' TERM; while :; do sleep 0.05; done` },
     });
     expect(result.timedOut).toBe(true);
+    expect(result.signal).toBe('SIGKILL');
     expect(Date.now() - started).toBeLessThan(5_000);
     expect(alive(result.pgid)).toBe(false);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('sends SIGTERM first and gives the job its grace period', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'exec-'));
+    const logs: string[] = [];
+    const result = await runCommand({
+      cwd: dir,
+      env: envWithoutJob(),
+      timeoutMs: 300,
+      graceMs: 10_000,
+      shell: { command: `trap 'echo got-term; exit 0' TERM; echo ready; while :; do sleep 0.05; done` },
+      onLog: (event) => {
+        // bash also reports the killed `sleep` on stderr.
+        if (event.stream === 'stdout') logs.push(event.text);
+      },
+    });
+    expect(result.timedOut).toBe(true);
+    expect(result.signal).toBeNull();
+    expect(result.exitCode).toBe(0);
+    expect(logs).toEqual(['ready', 'got-term']);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('cancels at once when the abort signal is already aborted', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'exec-'));
+    const started = Date.now();
+    const result = await runCommand({
+      cwd: dir,
+      env: envWithoutJob(),
+      timeoutMs: 15_000,
+      graceMs: 200,
+      abortSignal: AbortSignal.abort('cancel'),
+      shell: { command: 'sleep 30' },
+    });
+    expect(result.cancelled).toBe(true);
+    expect(result.timedOut).toBe(false);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('labels stderr lines as stderr', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'exec-'));
+    const events: { stream: string; text: string }[] = [];
+    const result = await runCommand({
+      cwd: dir,
+      env: envWithoutJob(),
+      timeoutMs: 10_000,
+      shell: { command: 'echo out; echo err >&2' },
+      onLog: (event) => events.push(event),
+    });
+    expect(result.exitCode).toBe(0);
+    expect(events).toContainEqual({ stream: 'stdout', text: 'out' });
+    expect(events).toContainEqual({ stream: 'stderr', text: 'err' });
+    expect(events).toHaveLength(2);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('keeps a line split across chunks whole and emits a last line without a newline', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'exec-'));
+    const events: { stream: string; text: string }[] = [];
+    const script = 'process.stdout.write("x".repeat(200000) + "\\n" + "done")';
+    const result = await runCommand({
+      cwd: dir,
+      env: envWithoutJob(),
+      timeoutMs: 10_000,
+      shell: { argv: [process.execPath, '-e', script] },
+      onLog: (event) => events.push(event),
+    });
+    expect(result.exitCode).toBe(0);
+    expect(events.map((event) => event.text.length)).toEqual([200_000, 4]);
+    expect(events[0].text).toBe('x'.repeat(200_000));
+    expect(events[1]).toEqual({ stream: 'stdout', text: 'done' });
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -127,6 +203,29 @@ describe('executor', () => {
   });
 });
 
+describe('killProcessGroup', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('refuses process group 0 and 1 without sending a signal', () => {
+    // A stub: with a broken guard, process.kill(-1) would signal every process of the user.
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    expect(() => killProcessGroup(1, 'SIGTERM')).toThrow('refusing to signal process group 1');
+    expect(() => killProcessGroup(0, 'SIGTERM')).toThrow('refusing to signal process group 0');
+    expect(kill).not.toHaveBeenCalled();
+  });
+
+  it('ignores a group that is gone but throws on other kill errors', () => {
+    const fail = (code: string) => () => {
+      throw Object.assign(new Error(code), { code });
+    };
+    vi.spyOn(process, 'kill').mockImplementationOnce(fail('ESRCH')).mockImplementationOnce(fail('EPERM'));
+    expect(() => killProcessGroup(4242, 'SIGTERM')).not.toThrow();
+    expect(() => killProcessGroup(4242, 'SIGTERM')).toThrow('EPERM');
+  });
+});
+
 describe('artifacts', () => {
   it('collects glob matches and skips files outside the root', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'art-'));
@@ -138,6 +237,12 @@ describe('artifacts', () => {
     await rm(root, { recursive: true, force: true });
   });
 });
+
+function envWithoutJob(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.TESTBOX_JOB_ID;
+  return env;
+}
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
