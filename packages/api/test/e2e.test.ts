@@ -7,6 +7,7 @@ import { createId, createSnapshot, JobStore, writeRetention, type JobRecord } fr
 import { Daemon, startDaemon } from '@testbox/worker';
 import { CleanupService } from '../src/cleanup.service';
 import { createApp } from '../src/create-app';
+import { JOB_STORE } from '../src/options';
 
 const redisUrl = process.env.TESTBOX_TEST_REDIS_URL ?? 'redis://127.0.0.1:6379';
 
@@ -537,6 +538,126 @@ describe('queue and execution', () => {
     expect(nextJob.state).toBe('succeeded');
     expect(nextJob.workerId).toBe('worker-b');
     expect(await readFile(marker, 'utf8')).toBe('RAN\n');
+  });
+});
+
+describe('auth and ownership', () => {
+  const open: { close: () => Promise<void> }[] = [];
+  afterEach(async () => {
+    while (open.length) await open.pop()?.close();
+  });
+  const fakeDigest = 'a'.repeat(64);
+
+  it('gives another user 404 on every route of a job', async () => {
+    const ctx = await boot();
+    open.push(ctx);
+    const alice = await user(ctx, 'alice');
+    const bob = await user(ctx, 'bob');
+    const id = (await submit(ctx, alice.token, { command: 'true' })).json.job.id as string;
+    const uploaded = await fetch(`${ctx.base}/v1/jobs/${id}/artifacts`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer worker-token-secret-123', 'x-artifact-path': 'a.txt' },
+      body: 'secret',
+    });
+    expect(uploaded.status).toBe(201);
+    const routes = [
+      ['GET', `/v1/jobs/${id}`],
+      ['GET', `/v1/jobs/${id}/logs`],
+      ['GET', `/v1/jobs/${id}/events`],
+      ['POST', `/v1/jobs/${id}/cancel`],
+      ['GET', `/v1/jobs/${id}/artifacts`],
+      ['GET', `/v1/jobs/${id}/artifacts/content?path=a.txt`],
+    ];
+    for (const [method, route] of routes) {
+      // Read only the status: an open event stream never ends.
+      const response = await fetch(`${ctx.base}${route}`, { method, headers: { authorization: `Bearer ${bob.token}` } });
+      await response.body?.cancel();
+      expect(response.status, `${method} ${route}`).toBe(404);
+    }
+    const job = await call(ctx, alice.token, 'GET', `/v1/jobs/${id}`);
+    expect(job.json.job.state).toBe('queued');
+    const download = await fetch(`${ctx.base}/v1/jobs/${id}/artifacts/content?path=a.txt`, {
+      headers: { authorization: `Bearer ${alice.token}` },
+    });
+    expect(await download.text()).toBe('secret');
+  });
+
+  it('gives another user 404 on a job with a snapshot that is not theirs', async () => {
+    const ctx = await boot({ withDaemon: false });
+    open.push(ctx);
+    const alice = await user(ctx, 'alice');
+    const bob = await user(ctx, 'bob');
+    const aliceWs = await call(ctx, alice.token, 'POST', '/v1/workspaces', { project: 'demo' });
+    const snapshotId = createId('snap');
+    await call(ctx, alice.token, 'POST', `/v1/workspaces/${aliceWs.json.id}/snapshots`, { id: snapshotId, digest: fakeDigest });
+    const bobWs = await call(ctx, bob.token, 'POST', '/v1/workspaces', { project: 'demo' });
+    const stolen = await call(ctx, bob.token, 'POST', '/v1/jobs', { workspaceId: bobWs.json.id, snapshotId, command: 'true' });
+    expect(stolen.status).toBe(404);
+    // Alice gets past the snapshot check and stops at "no worker".
+    const own = await call(ctx, alice.token, 'POST', '/v1/jobs', { workspaceId: aliceWs.json.id, snapshotId, command: 'true' });
+    expect(own.status).toBe(503);
+  });
+
+  it('keeps the worker token off user routes and user tokens off admin routes', async () => {
+    const ctx = await boot({ withDaemon: false });
+    open.push(ctx);
+    const alice = await user(ctx, 'alice');
+    expect((await call(ctx, 'worker-token-secret-123', 'GET', '/v1/workspaces')).status).toBe(403);
+    expect((await call(ctx, alice.token, 'POST', '/v1/users', { name: 'mallory' })).status).toBe(403);
+    expect((await call(ctx, alice.token, 'POST', '/v1/admin/cleanup')).status).toBe(403);
+    expect((await call(ctx, alice.token, 'GET', '/v1/admin/audit')).status).toBe(403);
+  });
+
+  it('rejects a token without the Bearer prefix and a token whose user is gone', async () => {
+    const ctx = await boot({ withDaemon: false });
+    open.push(ctx);
+    const alice = await user(ctx, 'alice');
+    const raw = await fetch(`${ctx.base}/v1/users/me`, { headers: { authorization: alice.token } });
+    expect(raw.status).toBe(401);
+    expect((await call(ctx, alice.token, 'GET', '/v1/users/me')).status).toBe(200);
+    // No route removes a user, so remove the record in the store.
+    const store = ctx.app.get<JobStore>(JOB_STORE);
+    await store.redis.del(store.k(`user:${alice.id}`));
+    expect((await call(ctx, alice.token, 'GET', '/v1/users/me')).status).toBe(401);
+  });
+
+  it('gives 404 to a worker upload for a job that does not exist', async () => {
+    const ctx = await boot({ withDaemon: false });
+    open.push(ctx);
+    const response = await fetch(`${ctx.base}/v1/jobs/job_${'a'.repeat(24)}/artifacts`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer worker-token-secret-123', 'x-artifact-path': 'a.txt' },
+      body: 'x',
+    });
+    expect(response.status).toBe(404);
+  });
+
+  it('gives 409 to a snapshot id registered again with another digest', async () => {
+    const ctx = await boot({ withDaemon: false });
+    open.push(ctx);
+    const alice = await user(ctx, 'alice');
+    const ws = await call(ctx, alice.token, 'POST', '/v1/workspaces', { project: 'demo' });
+    const route = `/v1/workspaces/${ws.json.id}/snapshots`;
+    const id = createId('snap');
+    expect((await call(ctx, alice.token, 'POST', route, { id, digest: fakeDigest })).status).toBe(201);
+    expect((await call(ctx, alice.token, 'POST', route, { id, digest: fakeDigest })).status).toBe(201);
+    expect((await call(ctx, alice.token, 'POST', route, { id, digest: 'b'.repeat(64) })).status).toBe(409);
+  });
+
+  it('returns the same job for a reused idempotency key and 409 for another body', async () => {
+    const ctx = await boot();
+    open.push(ctx);
+    const alice = await user(ctx, 'alice');
+    const ws = await call(ctx, alice.token, 'POST', '/v1/workspaces', { project: 'demo' });
+    const snapshotId = createId('snap');
+    await call(ctx, alice.token, 'POST', `/v1/workspaces/${ws.json.id}/snapshots`, { id: snapshotId, digest: fakeDigest });
+    const body = { workspaceId: ws.json.id, snapshotId, command: 'true', idempotencyKey: 'key-12345678' };
+    const first = await call(ctx, alice.token, 'POST', '/v1/jobs', body);
+    const second = await call(ctx, alice.token, 'POST', '/v1/jobs', body);
+    expect(first.status).toBe(201);
+    expect(second.json.job.id).toBe(first.json.job.id);
+    const changed = await call(ctx, alice.token, 'POST', '/v1/jobs', { ...body, command: 'false' });
+    expect(changed.status).toBe(409);
   });
 });
 
