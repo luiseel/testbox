@@ -339,7 +339,7 @@ describe('quoting and path safety', () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'tb cwd-'));
     const marker = path.join(dir, 'MARKER');
     try {
-      await exec('sh', ['-c', remoteBash('true', `x; touch ${marker}`)]).catch(() => undefined);
+      await exec('sh', ['-c', remoteBash('true', `x; touch ${quoteShellArg(marker)}`)]).catch(() => undefined);
       await expect(readFile(marker, 'utf8')).rejects.toThrow();
       const { stdout } = await exec('sh', ['-c', remoteBash('pwd -P', dir)]);
       expect(stdout.trim()).toBe(await realpath(dir));

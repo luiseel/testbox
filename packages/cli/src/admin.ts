@@ -70,8 +70,8 @@ export function defaultUserName(raw = os.userInfo().username): string {
   return cleaned.length >= 2 ? cleaned : 'admin-user';
 }
 
-function noHeartbeat(workerId: string): string {
-  return `${workerId} sent no heartbeat. Look at ~/testbox/logs/worker.stderr.log on that host.`;
+function noHeartbeat(workerId: string, dataDir = DEFAULT_DATA_DIR): string {
+  return `${workerId} sent no heartbeat. Look at ${dataDir}/logs/worker.stderr.log on that host.`;
 }
 
 export class AdminApp {
@@ -194,7 +194,7 @@ export class AdminApp {
       }
       const worker = await this.waitForWorker(result, Number(flags.wait ?? 600), output);
       if (!worker) {
-        output.failure(noHeartbeat(result.workerId), ExitCode.NoWorker);
+        output.failure(noHeartbeat(result.workerId, flags.dataDir ?? DEFAULT_DATA_DIR), ExitCode.NoWorker);
         return ExitCode.NoWorker;
       }
       output.info(`worker ${worker.id} is healthy: ${worker.labels.join(', ')}`);
