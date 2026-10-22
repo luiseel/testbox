@@ -4,10 +4,10 @@ import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile
 import os from 'os';
 import path from 'path';
 import { promisify } from 'util';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { defaultUserName, workerRedisUrl } from '../src/admin';
 import { bootstrapDir, composeScript, ipFromSshHost, parseResult, runBootstrap } from '../src/bootstrap';
-import { adminConfigPath, userConfigPath, writeAdminConfig } from '../src/config-store';
+import { adminConfigPath, userConfigPath, writeAdminConfig, writeUserConfig } from '../src/config-store';
 import { runCli } from '../src/main';
 import type { CommandResult, RemoteRunner, RunOptions } from '../src/remote';
 
@@ -246,7 +246,7 @@ describe('testbox admin', () => {
       fetchImpl: fetchImpl as typeof fetch,
     };
     try {
-      expect(await runCli(['admin', 'init-control-plane', 'omarchy.local'], io)).toBe(1);
+      expect(await runCli(['admin', 'init-control-plane', 'omarchy.local'], io)).toBe(2);
       expect(stderr.join('')).toContain('pass --address');
 
       expect(await runCli(['admin', 'init-control-plane', 'me@10.0.0.5', '--user', 'ana'], io)).toBe(0);
@@ -345,6 +345,153 @@ describe('testbox admin', () => {
       expect(upgrades[0]?.input).not.toContain('export TB_WORKER_TOKEN');
       expect(stderr.join('')).toContain('bad-1: worker failed on bad@10.0.0.8: the worker service is not installed');
       expect(stderr.join('')).toContain('1 of 2 workers did not come back');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
+/** Run `fn` with a fake clock that moves while it waits: the admin waits are seconds long. */
+async function fastClock<T>(fn: () => Promise<T>): Promise<T> {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] });
+  try {
+    let done = false;
+    const result = fn().finally(() => {
+      done = true;
+    });
+    while (!done) {
+      await new Promise((resolve) => setImmediate(resolve));
+      vi.advanceTimersByTime(1_000);
+    }
+    return await result;
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+const SECRETS = 'TESTBOX_RESULT {"workerToken":"w","bootstrapToken":"boot","redisPassword":"","apiPort":"3000","redisPort":"6379"}\n';
+const WORKER = 'TESTBOX_RESULT {"os":"linux","workerId":"box-1","xcode":false,"localNetworkBlocked":false,"node":"v22.23.3"}\n';
+
+/**
+ * A home with a control plane, and an SSH stand-in that answers the read-secrets script.
+ * `ssh` answers every other script; `fetchImpl` is the API.
+ */
+async function adminHome(
+  ssh: (input: string, args: string[]) => CommandResult,
+  fetchImpl: (url: URL) => Response,
+): Promise<{ home: string; stdout: string[]; run: (argv: string[]) => Promise<{ code: number; summary: Record<string, unknown> }> }> {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'tb-admin-j-'));
+  await writeAdminConfig(home, {
+    controlPlane: { sshHost: 'me@10.0.0.5', address: '10.0.0.5', apiPort: 3000, redisPort: 6379, repoDir: '~/testbox/app' },
+  });
+  const stdout: string[] = [];
+  const remote: RemoteRunner = {
+    async run(file, args, opts): Promise<CommandResult> {
+      if (file === 'git') return { code: 0, stdout: 'git@example.com:me/testbox.git\n', stderr: '' };
+      if (file === 'mutagen') return { code: 1, stdout: '', stderr: 'mutagen daemon is not running' };
+      const input = opts?.input ?? '';
+      if (input.includes('Print the control-plane secrets')) return { code: 0, stdout: SECRETS, stderr: '' };
+      return ssh(input, args);
+    },
+  };
+  const io = {
+    homeDir: home,
+    cwd: home,
+    stdout: { write: (chunk: string) => stdout.push(chunk) },
+    stderr: { write: () => undefined },
+    remote,
+    isTTY: false,
+    signals: new EventEmitter(),
+    prompt: async () => '',
+    fetchImpl: (async (url: string | URL | Request) => fetchImpl(new URL(String(url)))) as typeof fetch,
+  };
+  const run = async (argv: string[]) => {
+    stdout.length = 0;
+    const code = await runCli([...argv, '--json'], io);
+    const lines = stdout.join('').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines.filter((line) => line.type === 'summary')).toHaveLength(1);
+    const summary = lines.at(-1) as Record<string, unknown>;
+    expect(summary).toMatchObject({ type: 'summary', exit: code });
+    return { code, summary };
+  };
+  return { home, stdout, run };
+}
+
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+
+describe('testbox admin --json: a summary on every path', () => {
+  it('exits 2 for a missing address and a bad key, and maps an API error to its exit code', async () => {
+    const { home, run } = await adminHome(
+      () => ({ code: 0, stdout: 'TESTBOX_RESULT {"added":true}\n', stderr: '' }),
+      (url) => (url.pathname === '/v1/users' ? json({ error: { code: 'AUTH', message: 'invalid token' } }, 401) : json({ workers: [] })),
+    );
+    try {
+      const init = await run(['admin', 'init-control-plane', 'omarchy.local']);
+      expect(init.code).toBe(2);
+      expect(init.summary.error).toContain('pass --address');
+      expect((await run(['admin', 'add-worker', 'omarchy.local'])).code).toBe(2);
+      expect((await run(['admin', 'authorize', 'rm -rf /'])).code).toBe(2);
+      const user = await run(['admin', 'add-user', 'ana']);
+      expect(user.code).toBe(20);
+      expect(user.summary.error).toBe('invalid token');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('exits 1 when a worker does not get the key or does not come back', async () => {
+    const workers = [
+      { id: 'box-1', healthy: true, labels: [], sshHost: 'me@10.0.0.7' },
+      { id: 'bad-1', healthy: false, labels: [], sshHost: 'bad@10.0.0.8' },
+    ];
+    const { home, run } = await adminHome(
+      (input, args) => {
+        if (args.includes('bad@10.0.0.8')) return { code: 255, stdout: '', stderr: 'bad@10.0.0.8: Permission denied (publickey).' };
+        return { code: 0, stdout: input.includes('TB_PUBLIC_KEY') ? 'TESTBOX_RESULT {"added":true}\n' : WORKER, stderr: '' };
+      },
+      () => json({ workers }),
+    );
+    try {
+      const authorize = await run(['admin', 'authorize', 'ssh-ed25519 AAAAkey ana@laptop']);
+      expect(authorize.code).toBe(1);
+      expect(authorize.summary.error).toContain('1 of 2 workers did not get the key');
+      const upgrade = await run(['admin', 'upgrade', '--no-control-plane']);
+      expect(upgrade.code).toBe(1);
+      expect(upgrade.summary.error).toContain('1 of 2 workers did not come back');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('exits 11 when the API does not answer or the worker sends no heartbeat', async () => {
+    const result = 'TESTBOX_RESULT {"apiPort":3000,"redisPort":6379,"repoDir":"~/testbox/app","redisPasswordAdded":false}\n';
+    const { home, run } = await adminHome(
+      (input) => ({ code: 0, stdout: input.includes("TB_MODE='install'") ? WORKER : result, stderr: '' }),
+      (url) => (url.pathname === '/v1/healthz' ? new Response('', { status: 502 }) : json({ workers: [{ id: 'box-1', healthy: false, labels: [] }] })),
+    );
+    try {
+      const init = await fastClock(() => run(['admin', 'init-control-plane', 'me@10.0.0.5']));
+      expect(init.code).toBe(11);
+      expect(init.summary.error).toContain('cannot reach http://10.0.0.5:3000');
+      expect((await fastClock(() => run(['admin', 'upgrade']))).code).toBe(11);
+      const worker = await fastClock(() => run(['admin', 'add-worker', 'me@10.0.0.7', '--no-smoke']));
+      expect(worker.code).toBe(11);
+      expect(worker.summary.error).toContain('box-1 sent no heartbeat');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('ends add-worker with the exit code of a failed test job', async () => {
+    const { home, run } = await adminHome(
+      () => ({ code: 0, stdout: WORKER, stderr: '' }),
+      () => json({ workers: [{ id: 'box-1', healthy: true, labels: ['linux'] }] }),
+    );
+    try {
+      await writeUserConfig(home, { apiUrl: 'http://10.0.0.5:3000', token: 'tok', remoteRoot: '~/testbox' });
+      const smoke = await run(['admin', 'add-worker', 'me@10.0.0.7']);
+      expect(smoke.code).toBe(10);
+      expect(smoke.summary.error).toContain('the test job failed (exit 10)');
     } finally {
       await rm(home, { recursive: true, force: true });
     }

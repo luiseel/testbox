@@ -677,8 +677,7 @@ describe('agent-facing cli: links', () => {
       expect(linkState).toMatchObject({ id: 'ws_api', workerId: 'mac-1' });
 
       const snapshot = calls.find((entry) => (entry.args.at(-1) ?? '').includes('snapshot-cli'))?.args.at(-1) ?? '';
-      expect(snapshot).toContain('--staging-rel');
-      expect(snapshot).toContain('workspaces/usr_1/interface/ws_interface');
+      expect(snapshot).toContain("--staging-rel '\\''workspaces/usr_1/interface/ws_interface'\\''");
       expect(snapshot).toMatch(/--work-dir '\\''interface'\\''/);
       expect(snapshot).toMatch(/--link '\\''api=workspaces\/usr_1\/api\/ws_api'\\''/);
       expect(snapshot).toMatch(/--link-ignore '\\''api=secret.txt'\\''/);
@@ -870,6 +869,173 @@ describe('agent-facing cli: links', () => {
     } finally {
       await rm(home, { recursive: true, force: true });
       await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+/** The return value of runCli and the `exit` of the last --json line, which must be the same. */
+async function exitAndSummary(
+  argv: string[],
+  cli: ReturnType<typeof io>,
+  stdout: string[],
+): Promise<{ code: number; summary: Line & Record<string, unknown> }> {
+  stdout.length = 0;
+  const code = await runCli([...argv, '--json'], cli);
+  const lines = jsonLines(stdout);
+  expect(lines.filter((line) => line.type === 'summary')).toHaveLength(1);
+  const summary = lines.at(-1) as Line & Record<string, unknown>;
+  expect(summary.type).toBe('summary');
+  expect(summary.exit).toBe(code);
+  return { code, summary };
+}
+
+/** quietRemote, but ssh answers the runtime probe, makes folders, and gives `answer` for the command itself. */
+function directRemote(answer: (command: string) => CommandResult): RemoteRunner {
+  return {
+    async run(file, args) {
+      if (file !== 'ssh') return quietRemote.run(file, args);
+      const command = args.at(-1) ?? '';
+      if (command.includes('nodeVersion')) {
+        return { code: 0, stdout: JSON.stringify({ nodeVersion: 'v22.0.0', arch: 'x64', platform: 'linux', xcodeVersion: null }), stderr: '' };
+      }
+      if (command.startsWith('mkdir -p')) return { code: 0, stdout: '', stderr: '' };
+      return answer(command);
+    },
+  };
+}
+
+describe('agent-facing cli: each failure has its own exit code', () => {
+  it('stop without a workspace, cancel, status with a source, and --priority', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
+    const project = await mkdtemp(path.join(os.tmpdir(), 'tb-proj-'));
+    const stdout: string[] = [];
+    try {
+      await loggedIn(home);
+      await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
+      expect((await exitAndSummary(['stop'], io(home, project, quietRemote, stdout, []), stdout)).code).toBe(1);
+
+      const source = { path: project, branch: 'main', commit: 'abc1234', dirty: true };
+      const jobApi = (async (input: string | URL | Request) => {
+        const state = String(input).endsWith('/cancel') ? 'cancelled' : 'succeeded';
+        return new Response(JSON.stringify({ job: { id: 'job_7', state, exitCode: null, error: null, source } }), { status: 200 });
+      }) as typeof fetch;
+      const cancelled = await exitAndSummary(['cancel', 'job_7'], io(home, project, quietRemote, stdout, [], jobApi), stdout);
+      expect(cancelled.code).toBe(13);
+      expect(cancelled.summary.state).toBe('cancelled');
+
+      const status = await exitAndSummary(['status', 'job_7'], io(home, project, quietRemote, stdout, [], jobApi), stdout);
+      expect(status.code).toBe(0);
+      expect(status.summary.source).toEqual(source);
+
+      const jobs: unknown[] = [];
+      const api = fakeApi([]);
+      const recording = (async (input: string | URL | Request, init?: RequestInit) => {
+        if (String(input).endsWith('/jobs') && init?.method === 'POST') jobs.push(JSON.parse(String(init.body)));
+        return api(input, init);
+      }) as typeof fetch;
+      const verify = ['verify', 'unit', '--priority', '5'];
+      expect((await exitAndSummary(verify, io(home, project, quietRemote, stdout, [], recording), stdout)).code).toBe(0);
+      expect(jobs).toEqual([expect.objectContaining({ priority: 5 })]);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+      await rm(project, { recursive: true, force: true });
+    }
+  });
+
+  it('exits 20 when the event stream answers 401, even when the job succeeded', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
+    const stdout: string[] = [];
+    try {
+      await loggedIn(home);
+      const api = (async (input: string | URL | Request) => {
+        if (String(input).endsWith('/events')) return new Response('{"error":{"code":"AUTH","message":"bad token"}}', { status: 401 });
+        return new Response(JSON.stringify({ job: { id: 'job_7', state: 'succeeded', exitCode: 0, error: null } }), { status: 200 });
+      }) as typeof fetch;
+      const { code, summary } = await exitAndSummary(['logs', 'job_7', '--follow'], io(home, home, quietRemote, stdout, [], api), stdout);
+      expect(code).toBe(20);
+      expect(summary.error).toBe('bad token');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('--direct: exit 12 on a timeout, 11 when ssh fails, 2 without an ssh host', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
+    const project = await mkdtemp(path.join(os.tmpdir(), 'tb-proj-'));
+    const stdout: string[] = [];
+    try {
+      await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
+      expect((await exitAndSummary(['start', '--direct'], io(home, project, quietRemote, stdout, []), stdout)).code).toBe(2);
+
+      const host = ['--direct', '--ssh-host', 'dev@10.0.0.5'];
+      const timedOut = directRemote(() => ({ code: null, stdout: '', stderr: '', timedOut: true }));
+      const timeout = await exitAndSummary(['verify', 'unit', ...host], io(home, project, timedOut, stdout, []), stdout);
+      expect(timeout.code).toBe(12);
+      expect(timeout.summary.state).toBe('timed_out');
+
+      const unreachable: RemoteRunner = {
+        async run(file, args) {
+          if (file === 'ssh') return { code: 255, stdout: '', stderr: 'ssh: connect to host 10.0.0.5: No route to host' };
+          return quietRemote.run(file, args);
+        },
+      };
+      await rm(path.join(project, '.testbox'), { recursive: true, force: true });
+      expect((await exitAndSummary(['verify', 'unit', ...host], io(home, project, unreachable, stdout, []), stdout)).code).toBe(11);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+      await rm(project, { recursive: true, force: true });
+    }
+  });
+
+  it('exits 2 for --timeout 0, and 20 when login cannot reach the API', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
+    const project = await mkdtemp(path.join(os.tmpdir(), 'tb-proj-'));
+    const stdout: string[] = [];
+    const seen: string[] = [];
+    try {
+      await loggedIn(home);
+      await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
+      const verify = ['verify', 'unit', '--timeout', '0'];
+      expect((await exitAndSummary(verify, io(home, project, quietRemote, stdout, [], fakeApi(seen)), stdout)).code).toBe(2);
+      expect(seen).toEqual([]);
+
+      const down = (async () => {
+        throw new TypeError('fetch failed');
+      }) as typeof fetch;
+      const login = ['login', '--token', 'token-value-123456', '--api-url', 'http://api.test'];
+      expect((await exitAndSummary(login, io(home, project, quietRemote, stdout, [], down), stdout)).code).toBe(20);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+      await rm(project, { recursive: true, force: true });
+    }
+  });
+
+  it('doctor exits 11 when the API is down and 20 for a rejected token; setup stops at a rejected token', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
+    const stdout: string[] = [];
+    try {
+      await loggedIn(home);
+      const down = (async () => new Response('', { status: 502 })) as typeof fetch;
+      expect((await exitAndSummary(['doctor'], io(home, home, quietRemote, stdout, [], down), stdout)).code).toBe(11);
+
+      const rejected = (async (input: string | URL | Request) => {
+        if (String(input).endsWith('/healthz')) return new Response('{"ok":true}', { status: 200 });
+        return new Response('{"error":{"code":"AUTH","message":"invalid token"}}', { status: 401 });
+      }) as typeof fetch;
+      expect((await exitAndSummary(['doctor'], io(home, home, quietRemote, stdout, [], rejected), stdout)).code).toBe(20);
+
+      const calls: string[] = [];
+      const remote: RemoteRunner = {
+        async run(file, args) {
+          calls.push(file);
+          return quietRemote.run(file, args);
+        },
+      };
+      const setup = ['setup', '--api-url', 'http://api.test', '--token', 'bad-token-123456'];
+      expect((await exitAndSummary(setup, io(home, home, remote, stdout, [], rejected), stdout)).code).toBe(20);
+      expect(calls).not.toContain('ssh-keygen');
+    } finally {
+      await rm(home, { recursive: true, force: true });
     }
   });
 });

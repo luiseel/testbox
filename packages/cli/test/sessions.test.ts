@@ -98,6 +98,7 @@ describe('parseMutagenSessions', () => {
 
 describe('classifySessions', () => {
   it('finds deleted roots, unowned syncs, live syncs, and live syncs that share a destination', async () => {
+    // A state file that cannot be read keeps its sync: prune must not kill a live one.
     const session = (name: string, alpha: string, beta = 'me@w:~/testbox/workspaces/local/demo'): MutagenSessionInfo => ({
       name,
       alphaPath: alpha,
@@ -110,6 +111,7 @@ describe('classifySessions', () => {
       '/plain': null,
       '/a': state('/a', 'testbox-demo-a', { 'mac-1': 'testbox-demo-a-mac-1' }),
       '/b': state('/b', 'testbox-demo-b'),
+      '/locked': 'unreadable',
     };
     const report = await classifySessions(
       [
@@ -119,6 +121,7 @@ describe('classifySessions', () => {
         session('testbox-demo-a-mac-1', '/a', 'me@mac:~/testbox/workspaces/local/demo'),
         session('testbox-demo-a-again', '/a'),
         session('testbox-demo-b', '/b'),
+        session('testbox-demo-locked', '/locked', 'me@w:~/testbox/workspaces/local/locked'),
         session('other-project', '/gone'),
       ],
       async (root) => (root in roots ? (roots[root] as RootState) : 'missing'),
@@ -130,6 +133,7 @@ describe('classifySessions', () => {
       ['testbox-demo-a-mac-1', 'live'],
       ['testbox-demo-a-again', 'unowned'],
       ['testbox-demo-b', 'live'],
+      ['testbox-demo-locked', 'live'],
     ]);
     expect(report.conflicts).toEqual([
       { betaUrl: 'me@w:~/testbox/workspaces/local/demo', roots: ['/a', '/b'], sessions: ['testbox-demo-a', 'testbox-demo-b'] },
