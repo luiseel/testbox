@@ -1,0 +1,36 @@
+project: testbox
+# Not synced to the worker. This list replaces the default list.
+ignore:
+  - .git
+  - node_modules
+  - .env
+  - ".env.*"
+  - .testbox
+  - "**/*.log"
+  - "**/node_modules"
+  - "**/dist"
+  - "**/*.tsbuildinfo"
+  - coverage
+  - tmp
+  - data
+profiles:
+  # The full gate from AGENTS.md. `pnpm test` needs flock and Redis (Docker here).
+  check:
+    command: pnpm typecheck && pnpm lint && pnpm test
+    requires: [linux, mise, docker]
+  typecheck:
+    command: pnpm typecheck
+    requires: [mise]
+  lint:
+    command: pnpm lint
+    requires: [mise]
+  test:
+    command: pnpm test
+    requires: [linux, mise, docker]
+  # These two suites do not need Redis.
+  cli:
+    command: pnpm --filter @testbox/cli test
+    requires: [mise]
+  worker:
+    command: pnpm --filter @testbox/worker test
+    requires: [mise]
