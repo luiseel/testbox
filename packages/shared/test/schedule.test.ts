@@ -20,6 +20,8 @@ function worker(patch: Partial<PlacementWorker> & Pick<PlacementWorker, 'id' | '
     capacity: 1,
     lastSeen: now,
     active: 0,
+    waiting: 0,
+    lastJobAt: 0,
     sshHost: null,
     ...patch,
   };
@@ -65,6 +67,35 @@ describe('scheduler', () => {
     expect(workerCanRun(busy, { ...unit, targetWorkerId: 'busy' }, now, ttl)).toBe(true);
   });
 
+  it('gives equal workers turns: the one that waited longest wins', () => {
+    const unit = { requires: ['mise'] };
+    const a = worker({ id: 'a', labels: ['mise'], lastJobAt: 200 });
+    const b = worker({ id: 'b', labels: ['mise'], lastJobAt: 100 });
+    const c = worker({ id: 'c', labels: ['mise'], lastJobAt: 300 });
+    expect(chooseWorker(unit, [a, b, c], null, now, ttl)?.id).toBe('b');
+    expect(chooseSyncTarget(unit, [a, b, c], null, now, ttl)?.id).toBe('b');
+  });
+
+  it('syncs to the least-loaded worker when the warm worker is full; the warm worker wins a tie', () => {
+    const unit = { requires: [] as string[] };
+    const warm = worker({ id: 'warm', labels: [], active: 1 });
+    const cold = worker({ id: 'cold', labels: [] });
+    expect(chooseSyncTarget(unit, [warm, cold], 'warm', now, ttl)?.id).toBe('cold');
+    const busy = worker({ id: 'busy', labels: [], active: 1 });
+    expect(chooseSyncTarget(unit, [busy, warm], 'warm', now, ttl)?.id).toBe('warm');
+    const backlog = worker({ id: 'backlog', labels: [], active: 1, waiting: 2 });
+    expect(chooseSyncTarget(unit, [backlog, busy], 'backlog', now, ttl)?.id).toBe('busy');
+  });
+
+  it('counts queued jobs pinned to a worker as its load', () => {
+    const unit = { requires: [] as string[] };
+    const pinned = worker({ id: 'a', labels: [], waiting: 1 });
+    const free = worker({ id: 'b', labels: [], lastJobAt: 500 });
+    expect(chooseSyncTarget(unit, [pinned, free], null, now, ttl)?.id).toBe('b');
+    expect(chooseSyncTarget(unit, [pinned, free], 'a', now, ttl)?.id).toBe('b');
+    expect(workerCanRun(pinned, { ...unit, targetWorkerId: 'a' }, now, ttl)).toBe(true);
+  });
+
   it('orders queued jobs by priority then fifo', () => {
     const ranked = rankQueuedJobs([
       { id: 'low', priority: 0, createdAt: 1 },
@@ -75,21 +106,22 @@ describe('scheduler', () => {
     expect(ranked.map((job) => job.id)).toEqual(['high-early', 'high-late', 'low', 'low-late']);
   });
 
-  it('counts assigned and running jobs as active and gives a capacity of 0 one slot', () => {
+  it('counts active and pinned queued jobs, keeps the last job time, and gives a capacity of 0 one slot', () => {
     const records: WorkerRecord[] = [
       { id: 'w1', hostname: 'h1', os: 'linux', arch: 'x64', labels: ['linux'], capacity: 3, lastSeen: now, sshHost: 'testbox@h1' },
       { id: 'w2', hostname: 'h2', os: 'linux', arch: 'x64', labels: [], capacity: 0, lastSeen: now - 5, sshHost: null },
     ];
     const jobs = [
-      { workerId: 'w1', state: 'assigned' },
-      { workerId: 'w1', state: 'running' },
-      { workerId: 'w1', state: 'succeeded' },
-      { workerId: 'w1', state: 'queued' },
+      { workerId: 'w1', state: 'assigned', assignedAt: 30 },
+      { workerId: 'w1', state: 'running', assignedAt: 20 },
+      { workerId: 'w1', state: 'succeeded', assignedAt: 10, endedAt: 40 },
+      { workerId: null, state: 'queued', targetWorkerId: 'w1' },
+      { workerId: null, state: 'queued', targetWorkerId: null },
       { workerId: 'w2', state: 'cancelled' },
     ] as JobRecord[];
     expect(toPlacementWorkers(records, jobs)).toEqual([
-      { id: 'w1', labels: ['linux'], capacity: 3, lastSeen: now, active: 2, sshHost: 'testbox@h1' },
-      { id: 'w2', labels: [], capacity: 1, lastSeen: now - 5, active: 0, sshHost: null },
+      { id: 'w1', labels: ['linux'], capacity: 3, lastSeen: now, active: 2, waiting: 1, lastJobAt: 40, sshHost: 'testbox@h1' },
+      { id: 'w2', labels: [], capacity: 1, lastSeen: now - 5, active: 0, waiting: 0, lastJobAt: 0, sshHost: null },
     ]);
   });
 
