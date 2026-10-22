@@ -59,7 +59,7 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
     writeOut: (text) => full.stdout.write(text),
     writeErr: (text) => full.stderr.write(text),
   });
-  program.name('testbox').description('Run builds and tests on self-hosted macOS and Linux workers');
+  program.name('testbox').description('run builds and tests on a self-hosted worker, from an agent or a terminal');
 
   const common = (command: Command) =>
     command

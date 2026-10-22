@@ -1,6 +1,6 @@
 # Working in this repo
 
-Testbox is a pre-CI tool: the `testbox` CLI syncs a checkout to a worker and runs a profile there. This file is for anyone (person or coding agent) who changes this repo.
+Testbox gives coding agents a self-hosted machine to run builds and tests on: the `testbox` CLI copies a checkout to a worker and runs a profile there. This file is for anyone (person or coding agent) who changes this repo.
 
 ## Verify a change
 
