@@ -208,7 +208,7 @@ describe('claimNextJob', () => {
       const high = baseJob(store.prefix, { profile: null, queueKey: '', priority: 5, createdAt: now });
       await store.createJob(low);
       await store.createJob(high);
-      const claimed = await claimNextJob(store, 'w1', now, ttl, lease);
+      const claimed = await claimNextJob(store, 'w1', () => now, ttl, lease);
       expect(claimed).toMatchObject({
         id: high.id,
         state: 'assigned',
@@ -219,8 +219,52 @@ describe('claimNextJob', () => {
       });
       expect(await store.getWorkspaceAffinity(high.workspaceId)).toBe('w1');
       // The one slot is taken now.
-      expect(await claimNextJob(store, 'w1', now, ttl, lease)).toBeNull();
+      expect(await claimNextJob(store, 'w1', () => now, ttl, lease)).toBeNull();
       expect((await store.getJob(low.id))?.state).toBe('queued');
+    } finally {
+      await close();
+    }
+  });
+
+  it('starts the lease at the assignment and holds the lock for all of a slow claim', async () => {
+    const { store, client, close } = await openStore();
+    try {
+      await seed(store, [{ id: 'w1' }]);
+      const job = baseJob(store.prefix);
+      await store.createJob(job);
+      let time = now;
+      let lockTtl = 0;
+      const readJobs = store.listAllJobs.bind(store);
+      store.listAllJobs = async () => {
+        const jobs = await readJobs();
+        time += 10_000;
+        lockTtl = await client.pttl(store.k('lock:scheduler'));
+        return jobs;
+      };
+      const readAffinities = store.getWorkspaceAffinities.bind(store);
+      store.getWorkspaceAffinities = async (ids) => {
+        const affinities = await readAffinities(ids);
+        time += 10_000;
+        return affinities;
+      };
+      const claimed = await claimNextJob(store, 'w1', () => time, ttl, lease);
+      expect(claimed).toMatchObject({ assignedAt: now + 20_000, leaseExpiresAt: now + 20_000 + lease });
+      expect(lockTtl).toBeGreaterThan(5_000);
+    } finally {
+      await close();
+    }
+  });
+
+  it('lists the jobs of every user', async () => {
+    const { store, close } = await openStore();
+    try {
+      const mine = baseJob(store.prefix, { profile: null, queueKey: '' });
+      const theirs = baseJob(store.prefix, { profile: null, queueKey: '', ownerId: 'other', id: createId('job') });
+      await store.createUser({ id: mine.ownerId, name: mine.ownerId, role: 'user', createdAt: now });
+      await store.createUser({ id: 'other', name: 'other', role: 'user', createdAt: now });
+      await store.createJob(mine);
+      await store.createJob(theirs);
+      expect((await store.listAllJobs()).map((job) => job.id).sort()).toEqual([mine.id, theirs.id].sort());
     } finally {
       await close();
     }
@@ -235,9 +279,9 @@ describe('claimNextJob', () => {
       ]);
       const job = baseJob(store.prefix, { requires: ['linux'] });
       await store.createJob(job);
-      expect(await claimNextJob(store, 'stale', now, ttl, lease)).toBeNull();
-      expect(await claimNextJob(store, 'nobody', now, ttl, lease)).toBeNull();
-      expect(await claimNextJob(store, 'mac', now, ttl, lease)).toBeNull();
+      expect(await claimNextJob(store, 'stale', () => now, ttl, lease)).toBeNull();
+      expect(await claimNextJob(store, 'nobody', () => now, ttl, lease)).toBeNull();
+      expect(await claimNextJob(store, 'mac', () => now, ttl, lease)).toBeNull();
       expect((await store.getJob(job.id))?.state).toBe('queued');
     } finally {
       await close();
@@ -251,8 +295,8 @@ describe('claimNextJob', () => {
       const job = baseJob(store.prefix);
       await store.createJob(job);
       await store.setWorkspaceAffinity(job.workspaceId, 'b');
-      expect(await claimNextJob(store, 'a', now, ttl, lease)).toBeNull();
-      expect((await claimNextJob(store, 'b', now, ttl, lease))?.id).toBe(job.id);
+      expect(await claimNextJob(store, 'a', () => now, ttl, lease)).toBeNull();
+      expect((await claimNextJob(store, 'b', () => now, ttl, lease))?.id).toBe(job.id);
     } finally {
       await close();
     }

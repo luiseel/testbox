@@ -17,7 +17,7 @@ profiles:
   # The full gate from AGENTS.md. `pnpm test` needs flock and Redis (Docker here).
   check:
     command: pnpm typecheck && pnpm lint && pnpm test
-    requires: [linux, mise, docker]
+    requires: [mise, docker]
   typecheck:
     command: pnpm typecheck
     requires: [mise]
@@ -26,12 +26,12 @@ profiles:
     requires: [mise]
   test:
     command: pnpm test
-    requires: [linux, mise, docker]
+    requires: [mise, docker]
   # This suite does not need Redis.
   cli:
     command: pnpm --filter @testbox/cli test
-    requires: [linux, mise]
+    requires: [mise]
   # The daemon tests need Redis (Docker here) and flock.
   worker:
     command: TESTBOX_TEST_PACKAGES=worker pnpm test
-    requires: [linux, mise, docker]
+    requires: [mise, docker]

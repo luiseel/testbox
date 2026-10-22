@@ -170,7 +170,7 @@ export class Daemon {
           const job = await claimNextJob(
             this.store,
             this.opts.workerId,
-            Date.now(),
+            Date.now,
             this.heartbeatTtlMs,
             this.leaseMs,
           );
@@ -221,6 +221,8 @@ export class Daemon {
     }, Math.max(50, Math.floor(this.leaseMs / 3)));
     const stopRenew = () => clearInterval(renew);
     this.renewals.set(jobId, stopRenew);
+    // The claim can end close to its lease on a slow link; do not wait a full interval.
+    void this.renew(jobId, abort);
 
     try {
       const job = await this.requireJob(jobId);

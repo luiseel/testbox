@@ -139,40 +139,47 @@ export function chooseSyncTarget(
   return best;
 }
 
+/** Longer than a claim from a worker on a slow link to Redis can take. */
+const CLAIM_LOCK_TTL_MS = 60_000;
+
 /**
  * Claim the next queued job this worker should run.
  * Higher priority first, then FIFO. Workspace affinity wins when that worker can take the job.
+ * The clock is read after the reads and again at the assignment, so a slow link to Redis does not shorten the lease.
  */
 export async function claimNextJob(
   store: JobStore,
   workerId: string,
-  now: number,
+  clock: () => number,
   heartbeatTtlMs: number,
   leaseMs: number,
 ): Promise<JobRecord | null> {
   return store.withLock('scheduler', async () => {
     const workers = await store.listWorkers();
     const records = await store.listAllJobs();
+    const now = clock();
     const placement = toPlacementWorkers(workers, records);
     const me = placement.find((worker) => worker.id === workerId);
     if (!me || !workerIsHealthy(me, now, heartbeatTtlMs)) return null;
     if (me.active >= me.capacity) return null;
 
     const queued = rankQueuedJobs(records.filter((job) => job.state === 'queued'));
+    const affinities = await store.getWorkspaceAffinities(queued.map((job) => job.workspaceId));
     for (const job of queued) {
-      const affinity = await store.getWorkspaceAffinity(job.workspaceId);
+      const affinity = affinities.get(job.workspaceId) ?? null;
       const chosen = chooseWorker(job, placement, affinity, now, heartbeatTtlMs);
       if (!chosen || chosen.id !== workerId) continue;
+      const assignedAt = clock();
       const result = await store.transition(job.id, ['queued'], 'assigned', {
         workerId,
         attemptId: `attempt_${job.id}`,
-        assignedAt: now,
-        leaseExpiresAt: now + leaseMs,
+        assignedAt,
+        leaseExpiresAt: assignedAt + leaseMs,
       });
       if (!result.ok) continue;
       await store.setWorkspaceAffinity(job.workspaceId, workerId);
       return store.getJob(job.id);
     }
     return null;
-  });
+  }, CLAIM_LOCK_TTL_MS);
 }
