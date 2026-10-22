@@ -96,6 +96,16 @@ describe('daemon', () => {
     expect(renewLease.mock.calls.length).toBe(calls);
   });
 
+  it('renews the lease as soon as it takes a job, before the first interval', async () => {
+    const ctx = await boot({ leaseMs: 60_000 });
+    const renewLease = vi.spyOn(ctx.daemon.store, 'renewLease');
+    const job = await queueJob(ctx, { command: 'sleep 0.3' });
+    const run = ctx.daemon.handleJob(job.id);
+    await waitFor(async () => renewLease.mock.calls.length > 0, 2_000);
+    await run;
+    expect((await ctx.daemon.store.getJob(job.id))?.state).toBe('succeeded');
+  });
+
   describe('a claimed job that cannot start fails without running its command', () => {
     it('when the snapshot changed after submission', async () => {
       const ctx = await boot();

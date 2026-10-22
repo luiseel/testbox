@@ -162,11 +162,12 @@ export class JobStore {
     return this.k(`job:${id}`);
   }
 
-  async withLock<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  /** `ttlMs` must be longer than `fn` can take, or a second holder can enter while `fn` still runs. */
+  async withLock<T>(name: string, fn: () => Promise<T>, ttlMs = 5000): Promise<T> {
     const key = this.k(`lock:${name}`);
     const token = randomBytes(8).toString('hex');
     for (let attempt = 0; attempt < 50; attempt++) {
-      const ok = await this.redis.set(key, token, 'PX', 5000, 'NX');
+      const ok = await this.redis.set(key, token, 'PX', ttlMs, 'NX');
       if (ok === 'OK') {
         try {
           return await fn();
@@ -450,6 +451,14 @@ export class JobStore {
 
   async getWorkspaceAffinity(workspaceId: string): Promise<string | null> {
     return this.redis.get(this.k(`affinity:${workspaceId}`));
+  }
+
+  /** The affinity of each workspace, in one round trip. */
+  async getWorkspaceAffinities(workspaceIds: readonly string[]): Promise<Map<string, string | null>> {
+    const unique = [...new Set(workspaceIds)];
+    if (unique.length === 0) return new Map();
+    const values = await this.redis.mget(unique.map((id) => this.k(`affinity:${id}`)));
+    return new Map(unique.map((id, i) => [id, values[i] ?? null]));
   }
 
   async listWorkers(): Promise<WorkerRecord[]> {

@@ -226,21 +226,30 @@ describe('claimNextJob', () => {
     }
   });
 
-  it('starts the lease when the reads end, so a slow link does not shorten it', async () => {
-    const { store, close } = await openStore();
+  it('starts the lease at the assignment and holds the lock for all of a slow claim', async () => {
+    const { store, client, close } = await openStore();
     try {
       await seed(store, [{ id: 'w1' }]);
       const job = baseJob(store.prefix);
       await store.createJob(job);
       let time = now;
-      const read = store.listAllJobs.bind(store);
+      let lockTtl = 0;
+      const readJobs = store.listAllJobs.bind(store);
       store.listAllJobs = async () => {
-        const jobs = await read();
+        const jobs = await readJobs();
         time += 10_000;
+        lockTtl = await client.pttl(store.k('lock:scheduler'));
         return jobs;
       };
+      const readAffinities = store.getWorkspaceAffinities.bind(store);
+      store.getWorkspaceAffinities = async (ids) => {
+        const affinities = await readAffinities(ids);
+        time += 10_000;
+        return affinities;
+      };
       const claimed = await claimNextJob(store, 'w1', () => time, ttl, lease);
-      expect(claimed).toMatchObject({ assignedAt: now + 10_000, leaseExpiresAt: now + 10_000 + lease });
+      expect(claimed).toMatchObject({ assignedAt: now + 20_000, leaseExpiresAt: now + 20_000 + lease });
+      expect(lockTtl).toBeGreaterThan(5_000);
     } finally {
       await close();
     }
