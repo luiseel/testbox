@@ -33,7 +33,7 @@ Flags for `verify` and `run`: `--detach` (submit and return the job id), `--time
 | `admin add-user <name>` | Makes the user if needed, prints a `testbox setup` line with a new token. |
 | `admin authorize '<public key>'` | Adds an SSH public key to every worker. |
 
-Admin exit codes: 2 when the address is missing (pass `--address <LAN IP>`) or the public key is not one SSH public key line; 11 when the API does not answer after `init-control-plane` or `upgrade`, or a new worker sends no heartbeat; 1 when a worker fails in `upgrade` or `authorize`; a failed test job of `add-worker` gives the exit code of that job. With `--json`, each admin command ends with a `summary`, as every command does.
+Admin exit codes: 2 when the address is missing (pass `--address <LAN IP>`) or the public key is not one SSH public key line; 11 when the API does not answer after `init-control-plane` or `upgrade`, or a new worker sends no heartbeat; 1 when a worker fails in `upgrade` or `authorize`; when the test job of `add-worker` fails, admin exits with the status of that `verify` (1 for a failed job, 10 when the sync fails), not the `exitCode` of the command on the worker. With `--json`, each admin command ends with a `summary`, as every command does.
 
 ## Exit codes
 

@@ -378,7 +378,8 @@ const WORKER = 'TESTBOX_RESULT {"os":"linux","workerId":"box-1","xcode":false,"l
  */
 async function adminHome(
   ssh: (input: string, args: string[]) => CommandResult,
-  fetchImpl: (url: URL) => Response,
+  fetchImpl: (url: URL, init?: RequestInit) => Response,
+  options: { mutagen?: boolean } = {},
 ): Promise<{ home: string; stdout: string[]; run: (argv: string[]) => Promise<{ code: number; summary: Record<string, unknown> }> }> {
   const home = await mkdtemp(path.join(os.tmpdir(), 'tb-admin-j-'));
   await writeAdminConfig(home, {
@@ -388,7 +389,8 @@ async function adminHome(
   const remote: RemoteRunner = {
     async run(file, args, opts): Promise<CommandResult> {
       if (file === 'git') return { code: 0, stdout: 'git@example.com:me/testbox.git\n', stderr: '' };
-      if (file === 'mutagen') return { code: 1, stdout: '', stderr: 'mutagen daemon is not running' };
+      if (file === 'mutagen' && !options.mutagen) return { code: 1, stdout: '', stderr: 'mutagen daemon is not running' };
+      if (file === 'mutagen') return { code: 0, stdout: args[1] === 'list' ? '[]' : '', stderr: '' };
       const input = opts?.input ?? '';
       if (input.includes('Print the control-plane secrets')) return { code: 0, stdout: SECRETS, stderr: '' };
       return ssh(input, args);
@@ -403,7 +405,7 @@ async function adminHome(
     isTTY: false,
     signals: new EventEmitter(),
     prompt: async () => '',
-    fetchImpl: (async (url: string | URL | Request) => fetchImpl(new URL(String(url)))) as typeof fetch,
+    fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => fetchImpl(new URL(String(url)), init)) as typeof fetch,
   };
   const run = async (argv: string[]) => {
     stdout.length = 0;
@@ -477,12 +479,15 @@ describe('testbox admin --json: a summary on every path', () => {
       const worker = await fastClock(() => run(['admin', 'add-worker', 'me@10.0.0.7', '--no-smoke']));
       expect(worker.code).toBe(11);
       expect(worker.summary.error).toContain('box-1 sent no heartbeat');
+      expect(worker.summary.error).toContain('~/testbox/logs/worker.stderr.log');
+      const custom = await fastClock(() => run(['admin', 'add-worker', 'me@10.0.0.7', '--no-smoke', '--data-dir', '/srv/tb']));
+      expect(custom.summary.error).toContain('/srv/tb/logs/worker.stderr.log');
     } finally {
       await rm(home, { recursive: true, force: true });
     }
   });
 
-  it('ends add-worker with the exit code of a failed test job', async () => {
+  it('ends add-worker with exit 10 when the test job cannot sync', async () => {
     const { home, run } = await adminHome(
       () => ({ code: 0, stdout: WORKER, stderr: '' }),
       () => json({ workers: [{ id: 'box-1', healthy: true, labels: ['linux'] }] }),
@@ -492,6 +497,37 @@ describe('testbox admin --json: a summary on every path', () => {
       const smoke = await run(['admin', 'add-worker', 'me@10.0.0.7']);
       expect(smoke.code).toBe(10);
       expect(smoke.summary.error).toContain('the test job failed (exit 10)');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('ends add-worker with exit 1 when the test job fails on the worker', async () => {
+    const snapshot = `${JSON.stringify({ digest: 'ab'.repeat(32), relPath: 'snapshots/snap' })}\n`;
+    const { home, run } = await adminHome(
+      (_input, args) => ({ code: 0, stdout: (args.at(-1) ?? '').includes('snapshot-cli') ? snapshot : WORKER, stderr: '' }),
+      (url, init) => {
+        const method = init?.method ?? 'GET';
+        if (url.pathname.endsWith('/workspaces') && method === 'POST') {
+          return json({ id: 'ws_smoke', project: 'testbox-smoke', stagingRel: 'workspaces/usr_1/testbox-smoke/ws_smoke' }, 201);
+        }
+        if (url.pathname.includes('/workers/select')) return json({ worker: { id: 'box-1', sshHost: 'me@10.0.0.7', labels: ['linux'] } });
+        if (url.pathname.endsWith('/snapshots')) return json({ id: 'snap', digest: 'ab'.repeat(32) }, 201);
+        if (url.pathname.endsWith('/jobs') && method === 'POST') {
+          return json({ job: { id: 'job_smoke', state: 'queued', exitCode: null, error: null }, superseded: [] }, 201);
+        }
+        if (url.pathname.endsWith('/events')) {
+          return new Response('event: done\ndata: {"state":"failed","exitCode":3,"error":"exit 3"}\n\n', { status: 200 });
+        }
+        return json({ workers: [{ id: 'box-1', healthy: true, labels: ['linux'] }] });
+      },
+      { mutagen: true },
+    );
+    try {
+      await writeUserConfig(home, { apiUrl: 'http://10.0.0.5:3000', token: 'tok', remoteRoot: '~/testbox' });
+      const smoke = await run(['admin', 'add-worker', 'me@10.0.0.7']);
+      expect(smoke.code).toBe(1);
+      expect(smoke.summary.error).toContain('the test job failed (exit 1)');
     } finally {
       await rm(home, { recursive: true, force: true });
     }

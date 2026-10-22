@@ -38,20 +38,26 @@ describe('executor', () => {
 
   it('escalates to SIGKILL when the process ignores SIGTERM', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'exec-'));
+    const sleepFile = path.join(dir, 'sleep.pid');
     const started = Date.now();
-    // The group leader itself ignores SIGTERM, so only the escalation can end it,
-    // with or without a job id in the environment.
-    const result = await runCommand({
+    // The group leader and its child ignore SIGTERM, so only the escalation can end
+    // them, with or without a job id in the environment.
+    const pending = runCommand({
       cwd: dir,
       env: envWithoutJob(),
       timeoutMs: 300,
       graceMs: 200,
-      shell: { command: `trap '' TERM; while :; do sleep 0.05; done` },
+      shell: { command: `trap '' TERM; sleep 30 & echo $! > ${shellQuote(sleepFile)}; wait` },
     });
+    await waitFor(async () => (await readFile(sleepFile, 'utf8').catch(() => '')).trim().length > 0);
+    const sleepPid = Number((await readFile(sleepFile, 'utf8')).trim());
+    const result = await pending;
     expect(result.timedOut).toBe(true);
     expect(result.signal).toBe('SIGKILL');
     expect(Date.now() - started).toBeLessThan(5_000);
     expect(alive(result.pgid)).toBe(false);
+    await waitFor(async () => !alive(sleepPid));
+    expect(alive(sleepPid)).toBe(false);
     await rm(dir, { recursive: true, force: true });
   });
 
