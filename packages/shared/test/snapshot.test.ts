@@ -192,6 +192,42 @@ describe('retention', () => {
     expect(await readFile(path.join(dataDir, 'workspaces', 'u', 'src.txt'), 'utf8')).toBe('live\n');
     await rm(dataDir, { recursive: true, force: true });
   });
+
+  it('removes an item at its exact expiry time, not before', async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), 'ret-'));
+    try {
+      await mkdir(path.join(dataDir, 'logs', 'job_b'), { recursive: true });
+      await writeRetention(dataDir, 'logs', 'job_b', 5000);
+      expect((await cleanupExpired(dataDir, 4999)).removed).toEqual([]);
+      expect((await cleanupExpired(dataDir, 5000)).removed).toEqual([path.join('logs', 'job_b')]);
+      await expect(readdir(path.join(dataDir, 'logs', 'job_b'))).rejects.toThrow();
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('reused snapshot id', () => {
+  it('drops files of an earlier snapshot with the same id', async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), 'snap-'));
+    const stagingRel = 'workspaces/usr_a/demo/ws_1';
+    try {
+      await mkdir(path.join(dataDir, stagingRel), { recursive: true });
+      await writeFile(path.join(dataDir, stagingRel, 'hello.txt'), 'v1\n');
+      await mkdir(path.join(dataDir, 'snapshots', 'snap_cccccccccccccccccccccccc'), { recursive: true });
+      await writeFile(path.join(dataDir, 'snapshots', 'snap_cccccccccccccccccccccccc', 'stray.txt'), 'old\n');
+      const snap = await createSnapshot({
+        dataDir,
+        stagingRel,
+        snapshotId: 'snap_cccccccccccccccccccccccc',
+        ignore: [],
+        retentionMs: 1000,
+      });
+      expect(await readdir(path.join(dataDir, snap.relPath))).toEqual(['hello.txt']);
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('dependency cache', () => {

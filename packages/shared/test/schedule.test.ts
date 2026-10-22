@@ -5,9 +5,12 @@ import {
   explainUnsatisfiable,
   labelsSatisfy,
   rankQueuedJobs,
+  toPlacementWorkers,
   workerCanRun,
+  workerIsHealthy,
   type PlacementWorker,
 } from '../src/schedule';
+import type { JobRecord, WorkerRecord } from '../src/types';
 
 const now = 1_000_000;
 const ttl = 15_000;
@@ -70,5 +73,37 @@ describe('scheduler', () => {
       { id: 'high-early', priority: 10, createdAt: 2 },
     ]);
     expect(ranked.map((job) => job.id)).toEqual(['high-early', 'high-late', 'low', 'low-late']);
+  });
+
+  it('counts assigned and running jobs as active and gives a capacity of 0 one slot', () => {
+    const records: WorkerRecord[] = [
+      { id: 'w1', hostname: 'h1', os: 'linux', arch: 'x64', labels: ['linux'], capacity: 3, lastSeen: now, sshHost: 'testbox@h1' },
+      { id: 'w2', hostname: 'h2', os: 'linux', arch: 'x64', labels: [], capacity: 0, lastSeen: now - 5, sshHost: null },
+    ];
+    const jobs = [
+      { workerId: 'w1', state: 'assigned' },
+      { workerId: 'w1', state: 'running' },
+      { workerId: 'w1', state: 'succeeded' },
+      { workerId: 'w1', state: 'queued' },
+      { workerId: 'w2', state: 'cancelled' },
+    ] as JobRecord[];
+    expect(toPlacementWorkers(records, jobs)).toEqual([
+      { id: 'w1', labels: ['linux'], capacity: 3, lastSeen: now, active: 2, sshHost: 'testbox@h1' },
+      { id: 'w2', labels: [], capacity: 1, lastSeen: now - 5, active: 0, sshHost: null },
+    ]);
+  });
+
+  it('treats a worker seen exactly one heartbeat ttl ago as healthy', () => {
+    expect(workerIsHealthy(worker({ id: 'a', labels: [], lastSeen: now - ttl }), now, ttl)).toBe(true);
+    expect(workerIsHealthy(worker({ id: 'a', labels: [], lastSeen: now - ttl - 1 }), now, ttl)).toBe(false);
+  });
+
+  it('does not sync to a stale worker, even the affinity worker', () => {
+    const stale = worker({ id: 'stale', labels: ['linux'], lastSeen: now - ttl - 1 });
+    const unit = { requires: [] as string[] };
+    expect(chooseSyncTarget(unit, [stale], 'stale', now, ttl)).toBeNull();
+    const full = worker({ id: 'full', labels: ['linux'], active: 1, capacity: 1 });
+    expect(chooseSyncTarget(unit, [stale, full], 'stale', now, ttl)?.id).toBe('full');
+    expect(chooseSyncTarget({ requires: ['macos'] }, [full], null, now, ttl)).toBeNull();
   });
 });
