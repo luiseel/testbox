@@ -5,8 +5,8 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc -b",
-    "typecheck": "tsc -b --pretty false",
+    "build": "tsrs -b",
+    "typecheck": "tsrs -b --pretty false",
     "test": "vitest run"
   },
   "dependencies": {
@@ -16,7 +16,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.18.10",
-    "typescript": "^5.6.3",
+    "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "vitest": "^3.0.0"
   }
 }

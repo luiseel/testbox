@@ -84,6 +84,8 @@ pnpm lint
 pnpm test        # starts its own Redis on a free port (redis-server, or Docker); needs flock (macOS: brew install flock)
 ```
 
+The compiler is [tsrs](https://github.com/oxc-project/tsrs). It needs Apple Silicon or Linux; there is no Intel Mac binary.
+
 [AGENTS.md](AGENTS.md) says how to verify a change and where the code is, for people and coding agents.
 
 ```
