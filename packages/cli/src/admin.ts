@@ -2,9 +2,9 @@ import { mkdtemp, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { ExitCode } from '@testbox/shared';
-import { CliApiError, exitCodeForCliError, HttpApi } from './api-client';
+import { HttpApi } from './api-client';
 import { BootstrapError, ipFromSshHost, repoRoot, runBootstrap } from './bootstrap';
-import { TestboxApp, type CliIO } from './commands';
+import { exitCodeForFailure, TestboxApp, UsageError, type CliIO } from './commands';
 import { readAdminConfig, readUserConfig, writeAdminConfig, writeUserConfig, type AdminConfig } from './config-store';
 import { Output } from './output';
 
@@ -70,6 +70,10 @@ export function defaultUserName(raw = os.userInfo().username): string {
   return cleaned.length >= 2 ? cleaned : 'admin-user';
 }
 
+function noHeartbeat(workerId: string): string {
+  return `${workerId} sent no heartbeat. Look at ~/testbox/logs/worker.stderr.log on that host.`;
+}
+
 export class AdminApp {
   constructor(
     private readonly io: CliIO,
@@ -84,10 +88,7 @@ export class AdminApp {
     const output = this.out();
     try {
       const address = flags.address ?? ipFromSshHost(sshHost);
-      if (!address) {
-        output.error(`pass --address <LAN IP of ${sshHost}>; workers and VPNs need an IP, not a .local name`);
-        return ExitCode.JobFailed;
-      }
+      if (!address) throw new UsageError(`pass --address <LAN IP of ${sshHost}>; workers and VPNs need an IP, not a .local name`);
       const repoDir = flags.repoDir ?? DEFAULT_REPO_DIR;
       output.info(`setting up the control plane on ${sshHost}`);
       const result = await runBootstrap<{ apiPort: number; redisPort: number; repoDir: string; redisPasswordAdded: boolean }>({
@@ -106,7 +107,7 @@ export class AdminApp {
       });
       const apiUrl = `http://${address}:${result.apiPort}`;
       if (!(await this.waitHealthy(apiUrl))) {
-        output.error(`the API runs on ${sshHost}, but this machine cannot reach ${apiUrl}. Check the firewall on ${sshHost}.`);
+        output.failure(`the API runs on ${sshHost}, but this machine cannot reach ${apiUrl}. Check the firewall on ${sshHost}.`, ExitCode.NoWorker);
         return ExitCode.NoWorker;
       }
       const admin: AdminConfig = {
@@ -165,10 +166,7 @@ export class AdminApp {
     try {
       const plane = await this.controlPlane();
       const address = flags.address ?? ipFromSshHost(sshHost);
-      if (!address) {
-        output.error(`pass --address <LAN IP of ${sshHost}>; developers sync to the worker at this address`);
-        return ExitCode.JobFailed;
-      }
+      if (!address) throw new UsageError(`pass --address <LAN IP of ${sshHost}>; developers sync to the worker at this address`);
       const secrets = await this.secrets();
       output.info(`setting up the worker on ${sshHost}`);
       const result = await runBootstrap<WorkerResult>({
@@ -195,7 +193,10 @@ export class AdminApp {
         output.info('no Xcode on this Mac: install it to get the xcode and ios-simulator labels');
       }
       const worker = await this.waitForWorker(result, Number(flags.wait ?? 600), output);
-      if (!worker) return ExitCode.NoWorker;
+      if (!worker) {
+        output.failure(noHeartbeat(result.workerId), ExitCode.NoWorker);
+        return ExitCode.NoWorker;
+      }
       output.info(`worker ${worker.id} is healthy: ${worker.labels.join(', ')}`);
       if (flags.smoke !== false) {
         const smoke = await this.smokeTest(worker.id, output);
@@ -232,7 +233,7 @@ export class AdminApp {
           onProgress: (line) => output.info(`  ${line}`),
         });
         if (!(await this.waitHealthy(await this.apiUrl(), 30))) {
-          output.error('the API did not come back after the update');
+          output.failure('the API did not come back after the update', ExitCode.NoWorker);
           return ExitCode.NoWorker;
         }
       }
@@ -262,10 +263,13 @@ export class AdminApp {
           continue;
         }
         const healthy = await this.waitForWorker({ workerId: worker.id }, 60, output);
-        if (!healthy) failed += 1;
+        if (!healthy) {
+          failed += 1;
+          output.error(noHeartbeat(worker.id));
+        }
       }
       if (failed > 0) {
-        output.error(`${failed} of ${workers.length} workers did not come back; run testbox admin add-worker for them`);
+        output.failure(`${failed} of ${workers.length} workers did not come back; run testbox admin add-worker for them`, ExitCode.JobFailed);
         return ExitCode.JobFailed;
       }
       output.info(`updated ${workers.length} worker${workers.length === 1 ? "" : "s"}`);
@@ -282,8 +286,7 @@ export class AdminApp {
     try {
       const key = publicKey.trim();
       if (!/^(ssh-|ecdsa-|sk-)\S+ \S+( [^\n]*)?$/.test(key)) {
-        output.error('expected one SSH public key line, for example the content of ~/.ssh/id_ed25519.pub');
-        return ExitCode.JobFailed;
+        throw new UsageError('expected one SSH public key line, for example the content of ~/.ssh/id_ed25519.pub');
       }
       const workers = (await (await this.adminApi()).listWorkers()).filter((worker) => worker.sshHost);
       let failed = 0;
@@ -302,7 +305,10 @@ export class AdminApp {
           output.error(`${worker.id}: ${err instanceof Error ? err.message : 'failed'}`);
         }
       }
-      if (failed > 0) return ExitCode.JobFailed;
+      if (failed > 0) {
+        output.failure(`${failed} of ${workers.length} workers did not get the key; fix SSH to them, then run this again`, ExitCode.JobFailed);
+        return ExitCode.JobFailed;
+      }
       output.summary({ ok: true, exitCode: 0, exit: 0 });
       return ExitCode.Pass;
     } catch (err) {
@@ -373,7 +379,6 @@ export class AdminApp {
       }
       await new Promise((resolve) => setTimeout(resolve, 2_000));
     }
-    output.error(`${result.workerId} sent no heartbeat. Look at ~/testbox/logs/worker.stderr.log on that host.`);
     return null;
   }
 
@@ -405,7 +410,7 @@ export class AdminApp {
       if (code === ExitCode.Pass) code = await app.verify('smoke', { timeout: '300' });
       await app.stop().catch(() => ExitCode.Pass);
       if (code !== ExitCode.Pass) {
-        output.error(`the test job failed (exit ${code}):\n${lines.join('').trim()}`);
+        output.failure(`the test job failed (exit ${code}):\n${lines.join('').trim()}`, code);
         return code;
       }
       const ok = lines.join('').split('\n').find((line) => line.startsWith('testbox ok on'));
@@ -442,7 +447,7 @@ export class AdminApp {
   }
 
   private fail(output: Output, err: unknown): number {
-    const code = err instanceof CliApiError ? (exitCodeForCliError(err) ?? ExitCode.JobFailed) : ExitCode.JobFailed;
+    const code = exitCodeForFailure(err);
     output.failure(err instanceof Error ? err.message : 'failed', code);
     return code;
   }

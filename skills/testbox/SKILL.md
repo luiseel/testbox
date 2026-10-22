@@ -36,7 +36,7 @@ testbox run "<command>" --json --quiet    # any command, same flow
 | --- | --- | --- |
 | 0 | job passed | done |
 | 1 | job failed | a real build or test failure: read the log and fix the code |
-| 2 | bad call: unknown profile, missing or invalid `testbox.yml`, bad flag, a link with no checkout or no `testbox.yml`, a bad or repeated `--link`, a `--link` the profile does not have, two links to one checkout or a link that is this checkout, `--direct` with links | fix the command line or `testbox.yml`, not the code |
+| 2 | bad call: unknown profile, missing or invalid `testbox.yml`, bad flag, a link with no checkout or no `testbox.yml`, a bad or repeated `--link`, a `--link` the profile does not have, two links to one checkout or a link that is this checkout, `--direct` with links, an `admin` command without `--address` or with a bad public key | fix the command line or `testbox.yml`, not the code |
 | 10 | sync error: Mutagen, the snapshot copy, or the local checkout lock (`flock` missing, or another run holds it) | infrastructure: run `testbox doctor`; for `another testbox run holds`, wait for that run |
 | 11 | no usable worker: none has all labels in `requires`, none with them is up, or SSH to it fails | run `testbox doctor`; if the labels are wrong, fix `requires` |
 | 12 | timeout, or the worker stopped during the job (`lease_expired`) | raise `--timeout` or find the hang; for `lease_expired`, run `testbox doctor` |

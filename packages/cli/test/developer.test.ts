@@ -151,7 +151,7 @@ describe('testbox admin authorize', () => {
       controlPlane: { sshHost: 'me@10.0.0.5', address: '10.0.0.5', apiPort: 3000, redisPort: 6379, repoDir: '~/testbox/app' },
     });
     try {
-      expect(await runCli(['admin', 'authorize', 'rm -rf /'], io(home, home, remote, fetchImpl, out))).toBe(1);
+      expect(await runCli(['admin', 'authorize', 'rm -rf /'], io(home, home, remote, fetchImpl, out))).toBe(2);
       expect(await runCli(['admin', 'authorize', 'ssh-ed25519 AAAAkey ana@laptop'], io(home, home, remote, fetchImpl, out))).toBe(0);
       expect(inputs.at(-1)).toContain("export TB_PUBLIC_KEY='ssh-ed25519 AAAAkey ana@laptop'");
       expect(out.join('')).toContain('a-1: key added');

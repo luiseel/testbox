@@ -33,13 +33,15 @@ Flags for `verify` and `run`: `--detach` (submit and return the job id), `--time
 | `admin add-user <name>` | Makes the user if needed, prints a `testbox setup` line with a new token. |
 | `admin authorize '<public key>'` | Adds an SSH public key to every worker. |
 
+Admin exit codes: 2 when the address is missing (pass `--address <LAN IP>`) or the public key is not one SSH public key line; 11 when the API does not answer after `init-control-plane` or `upgrade`, or a new worker sends no heartbeat; 1 when a worker fails in `upgrade` or `authorize`; a failed test job of `add-worker` gives the exit code of that job. With `--json`, each admin command ends with a `summary`, as every command does.
+
 ## Exit codes
 
 | Code | Meaning |
 | --- | --- |
 | 0 | job passed |
 | 1 | job failed, or another error at run time (for example a failed `doctor` check) |
-| 2 | bad call: unknown profile, missing or invalid `testbox.yml`, unknown flag or missing argument, bad `--timeout`, a link with no checkout or no `testbox.yml`, a `--link` the profile does not have, a bad or repeated `--link`, two links to one checkout or a link that is this checkout, `--direct` with links |
+| 2 | bad call: unknown profile, missing or invalid `testbox.yml`, unknown flag or missing argument, bad `--timeout`, a link with no checkout or no `testbox.yml`, a `--link` the profile does not have, a bad or repeated `--link`, two links to one checkout or a link that is this checkout, `--direct` with links, an `admin` command without an address or with a bad public key |
 | 10 | sync error: Mutagen, the snapshot copy, or the local checkout lock (`flock` is missing, or another run holds `.testbox/snapshot.lock` for over 15 minutes) |
 | 11 | no compatible worker: no worker has the labels, none with the labels sends heartbeats, SSH to the worker fails, or the API answers 503 |
 | 12 | timeout, or the worker stopped during the job (its lease expired) |
