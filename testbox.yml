@@ -30,7 +30,7 @@ profiles:
   # This suite does not need Redis.
   cli:
     command: pnpm --filter @testbox/cli test
-    requires: [mise]
+    requires: [linux, mise]
   # The daemon tests need Redis (Docker here) and flock.
   worker:
     command: TESTBOX_TEST_PACKAGES=worker pnpm test
