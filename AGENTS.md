@@ -13,8 +13,8 @@ pnpm test        # bash scripts/test.sh: every package's vitest suite
 ```
 
 - `pnpm test` starts its own Redis (`redis-server` on PATH, or Docker) on a free port. It needs `flock` (macOS: `brew install flock`). Without Redis it exits 1 and says so; that is not a test failure.
-- One package: `pnpm --filter @testbox/cli test`. The `cli` and `worker` suites do not need Redis. `shared` and `api` do; set `TESTBOX_TEST_REDIS_URL` or use `pnpm test`.
-- The tests do not touch the network, a real worker, or Mutagen. They fake `RemoteRunner` and `fetch` (see `packages/cli/test/agent.test.ts` for the shortest example).
+- One package: `pnpm --filter @testbox/cli test`. The `cli` suite does not need Redis. `shared`, `worker` and `api` do; set `TESTBOX_TEST_REDIS_URL`, or use `TESTBOX_TEST_PACKAGES=worker pnpm test`.
+- The tests do not touch the network, a real worker, or Mutagen. They fake `RemoteRunner` and `fetch` (see `packages/cli/test/agent.test.ts` for the shortest example). `packages/worker/test/daemon.test.ts` runs a real daemon against the test Redis.
 - With a testbox login, `testbox verify check` runs all three on a Linux worker. `testbox profiles` lists the faster profiles.
 - `pnpm build` is only needed to run the built CLI (`node packages/cli/dist/main.js`) or before `./scripts/install-cli.sh`.
 - `tsrs` is the compiler: a Rust port of TypeScript 7, pinned to one exact version. It has binaries for Apple Silicon and Linux (x64, arm64) only. The root `typescript` package is only there for eslint.
