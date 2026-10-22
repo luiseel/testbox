@@ -142,17 +142,19 @@ export function chooseSyncTarget(
 /**
  * Claim the next queued job this worker should run.
  * Higher priority first, then FIFO. Workspace affinity wins when that worker can take the job.
+ * The clock is read after the reads, so a slow link to Redis does not shorten the lease.
  */
 export async function claimNextJob(
   store: JobStore,
   workerId: string,
-  now: number,
+  clock: () => number,
   heartbeatTtlMs: number,
   leaseMs: number,
 ): Promise<JobRecord | null> {
   return store.withLock('scheduler', async () => {
     const workers = await store.listWorkers();
     const records = await store.listAllJobs();
+    const now = clock();
     const placement = toPlacementWorkers(workers, records);
     const me = placement.find((worker) => worker.id === workerId);
     if (!me || !workerIsHealthy(me, now, heartbeatTtlMs)) return null;

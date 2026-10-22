@@ -501,17 +501,22 @@ export class JobStore {
     await this.redis.hset(this.jobKey(id), 'pgid', String(pgid));
   }
 
+  /** Three round trips for any number of jobs: a worker on a slow link claims as fast as one next to Redis. */
   async listAllJobs(): Promise<JobRecord[]> {
     const userIds = await this.redis.smembers(this.k('users'));
-    const jobs: JobRecord[] = [];
-    for (const userId of userIds) {
-      const jobIds = await this.redis.smembers(this.k(`user:${userId}:jobs`));
-      for (const jobId of jobIds) {
-        const job = await this.getJob(jobId);
-        if (job) jobs.push(job);
-      }
-    }
-    return jobs;
+    const idLists = await this.pipelined(userIds.map((userId) => ['smembers', this.k(`user:${userId}:jobs`)]));
+    const jobIds = idLists.flatMap((ids) => (Array.isArray(ids) ? (ids as string[]) : []));
+    const raws = await this.pipelined(jobIds.map((jobId) => ['hgetall', this.jobKey(jobId)]));
+    return raws.map((raw) => decodeJob(raw as Record<string, string>)).filter((job): job is JobRecord => job !== null);
+  }
+
+  private async pipelined(commands: string[][]): Promise<unknown[]> {
+    if (commands.length === 0) return [];
+    const results = (await this.redis.pipeline(commands).exec()) ?? [];
+    return results.map(([err, value]) => {
+      if (err) throw err;
+      return value;
+    });
   }
 
   async deleteJobData(id: string): Promise<void> {
