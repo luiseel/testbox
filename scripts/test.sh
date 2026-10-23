@@ -80,10 +80,11 @@ if command -v docker >/dev/null; then
   machine="$(machine_id | head -n 1)"
   if [ -n "$machine" ]; then
     docker ps -a --filter "label=testbox.test.machine=$machine" \
-      --format '{{.Names}}{{"\t"}}{{.Label "testbox.test.pid"}}{{"\t"}}{{.Label "testbox.test.start"}}' |
-      while IFS=$'\t' read -r stale pid start; do
+      --format '{{.ID}}{{"\t"}}{{.Names}}{{"\t"}}{{.Label "testbox.test.pid"}}{{"\t"}}{{.Label "testbox.test.start"}}' |
+      while IFS=$'\t' read -r id stale pid start; do
         if [ -z "$start" ] || [ "$(process_start "$pid")" != "$start" ]; then
-          docker rm -f "$stale" >/dev/null 2>&1 || true
+          # By id, not by name: a concurrent run may reuse the name meanwhile.
+          docker rm -f "$id" >/dev/null 2>&1 || true
           echo "tests: removed stale $stale" >&2
         fi
       done
