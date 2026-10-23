@@ -15,7 +15,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 run_tests() {
-  local filters=()
+  local filters=() name
   for name in ${TESTBOX_TEST_PACKAGES:-shared worker api cli}; do
     filters+=(--filter "@testbox/$name")
   done
@@ -58,10 +58,23 @@ if command -v redis-server >/dev/null; then
 fi
 
 if command -v docker >/dev/null; then
+  # A run that was killed (SIGKILL, a tool timeout) never reaches its trap and
+  # leaves its container behind. Remove the ones whose script is no longer running.
+  # The host label keeps a Docker daemon shared between machines safe.
+  host="$(hostname)"
+  docker ps -a --filter "label=testbox.test.host=$host" --format '{{.Names}}' |
+    while read -r stale; do
+      pid="${stale##*-}"
+      if ! ps -p "$pid" >/dev/null 2>&1; then
+        docker rm -f "$stale" >/dev/null 2>&1 || true
+        echo "tests: removed stale $stale" >&2
+      fi
+    done
   name="testbox-test-redis-$$"
   trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
   # Host port 0: Docker picks a free one.
-  docker run -d --rm --name "$name" -p 127.0.0.1:0:6379 redis:7 >/dev/null
+  docker run -d --rm --name "$name" --label "testbox.test.host=$host" \
+    -p 127.0.0.1:0:6379 redis:7 >/dev/null
   port="$(docker port "$name" 6379/tcp | head -n 1 | sed 's/.*://')"
   wait_for_redis "docker exec $name redis-cli ping"
   export TESTBOX_TEST_REDIS_URL="redis://127.0.0.1:$port"
