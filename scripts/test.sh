@@ -87,11 +87,13 @@ if command -v docker >/dev/null; then
       fi
     done
   name="testbox-test-redis-$$"
-  trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
   # Host port 0: Docker picks a free one.
   docker run -d --rm --name "$name" -p 127.0.0.1:0:6379 \
     --label "testbox.test.machine=$machine" --label "testbox.test.pid=$$" \
     --label "testbox.test.start=$(process_start $$)" redis:7 >/dev/null
+  # Armed only after the run owns the container. If the name is taken on a
+  # shared daemon, docker run fails and the other run's container stays.
+  trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
   port="$(docker port "$name" 6379/tcp | head -n 1 | sed 's/.*://')"
   wait_for_redis "docker exec $name redis-cli ping"
   export TESTBOX_TEST_REDIS_URL="redis://127.0.0.1:$port"
