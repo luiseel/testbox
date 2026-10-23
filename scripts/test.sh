@@ -38,6 +38,16 @@ process_start() {
   LC_ALL=C TZ=UTC0 ps -o lstart= -p "$1" 2>/dev/null | sed 's/^ *//; s/ *$//'
 }
 
+process_alive() {
+  # $1: a pid. $2: its recorded start time, or empty when ps has no lstart;
+  # then only the pid can be checked.
+  if [ -n "$2" ]; then
+    [ "$(process_start "$1")" = "$2" ]
+  else
+    ps -p "$1" >/dev/null 2>&1
+  fi
+}
+
 wait_for_redis() {
   # $1: a command that answers PONG when Redis is ready
   for _ in $(seq 1 100); do
@@ -82,7 +92,7 @@ if command -v docker >/dev/null; then
     docker ps -a --filter "label=testbox.test.machine=$machine" \
       --format '{{.ID}}{{"\t"}}{{.Names}}{{"\t"}}{{.Label "testbox.test.pid"}}{{"\t"}}{{.Label "testbox.test.start"}}' |
       while IFS=$'\t' read -r id stale pid start; do
-        if [ -z "$start" ] || [ "$(process_start "$pid")" != "$start" ]; then
+        if ! process_alive "$pid" "$start"; then
           # By id, not by name: a concurrent run may reuse the name meanwhile.
           docker rm -f "$id" >/dev/null 2>&1 || true
           echo "tests: removed stale $stale" >&2
