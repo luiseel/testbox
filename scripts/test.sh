@@ -4,7 +4,8 @@
 # The shared, worker and api suites need Redis. This script finds one in this order:
 #   1. TESTBOX_TEST_REDIS_URL is set: use it as it is.
 #   2. redis-server is on PATH: start one on a free port, stop it at the end.
-#   3. docker is on PATH: run redis:7 on a random host port, remove it at the end.
+#   3. docker is on PATH: run redis:7 on a random host port, remove it at the end,
+#      and remove the containers that killed runs on this machine left behind.
 # The suites read the URL from TESTBOX_TEST_REDIS_URL. Port 6379 is never assumed,
 # so a Redis of another project on this machine is never touched.
 #
@@ -20,6 +21,21 @@ run_tests() {
     filters+=(--filter "@testbox/$name")
   done
   pnpm -r "${filters[@]}" run test "$@"
+}
+
+machine_id() {
+  # A hostname is not unique on a Docker daemon shared between machines.
+  local id
+  id="$(cat /etc/machine-id 2>/dev/null)"
+  [ -n "$id" ] || id="$(ioreg -rd1 -c IOPlatformExpertDevice 2>/dev/null | awk -F'"' '/IOPlatformUUID/ { print $4 }')"
+  [ -n "$id" ] || id="$(hostname)"
+  echo "$id"
+}
+
+process_start() {
+  # $1: a pid. Prints when it started, or nothing if it is gone. A reused pid
+  # has another start time, so the pair identifies one process.
+  ps -o lstart= -p "$1" 2>/dev/null | sed 's/^ *//; s/ *$//'
 }
 
 wait_for_redis() {
@@ -60,12 +76,12 @@ fi
 if command -v docker >/dev/null; then
   # A run that was killed (SIGKILL, a tool timeout) never reaches its trap and
   # leaves its container behind. Remove the ones whose script is no longer running.
-  # The host label keeps a Docker daemon shared between machines safe.
-  host="$(hostname)"
-  docker ps -a --filter "label=testbox.test.host=$host" --format '{{.Names}}' |
-    while read -r stale; do
-      pid="${stale##*-}"
-      if ! ps -p "$pid" >/dev/null 2>&1; then
+  # The labels name the machine and the process that started each container.
+  machine="$(machine_id)"
+  docker ps -a --filter "label=testbox.test.machine=$machine" \
+    --format '{{.Names}}{{"\t"}}{{.Label "testbox.test.pid"}}{{"\t"}}{{.Label "testbox.test.start"}}' |
+    while IFS=$'\t' read -r stale pid start; do
+      if [ -z "$start" ] || [ "$(process_start "$pid")" != "$start" ]; then
         docker rm -f "$stale" >/dev/null 2>&1 || true
         echo "tests: removed stale $stale" >&2
       fi
@@ -73,8 +89,9 @@ if command -v docker >/dev/null; then
   name="testbox-test-redis-$$"
   trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
   # Host port 0: Docker picks a free one.
-  docker run -d --rm --name "$name" --label "testbox.test.host=$host" \
-    -p 127.0.0.1:0:6379 redis:7 >/dev/null
+  docker run -d --rm --name "$name" -p 127.0.0.1:0:6379 \
+    --label "testbox.test.machine=$machine" --label "testbox.test.pid=$$" \
+    --label "testbox.test.start=$(process_start $$)" redis:7 >/dev/null
   port="$(docker port "$name" 6379/tcp | head -n 1 | sed 's/.*://')"
   wait_for_redis "docker exec $name redis-cli ping"
   export TESTBOX_TEST_REDIS_URL="redis://127.0.0.1:$port"
