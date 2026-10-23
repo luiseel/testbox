@@ -24,18 +24,18 @@ run_tests() {
 }
 
 machine_id() {
-  # A hostname is not unique on a Docker daemon shared between machines.
-  local id
-  id="$(cat /etc/machine-id 2>/dev/null)"
-  [ -n "$id" ] || id="$(ioreg -rd1 -c IOPlatformExpertDevice 2>/dev/null | awk -F'"' '/IOPlatformUUID/ { print $4 }')"
-  [ -n "$id" ] || id="$(hostname)"
-  echo "$id"
+  # A hostname is not unique on a Docker daemon shared between machines. Prints
+  # nothing when there is no reliable id; the caller then removes no container.
+  cat /etc/machine-id 2>/dev/null ||
+    ioreg -rd1 -c IOPlatformExpertDevice 2>/dev/null | awk -F'"' '/IOPlatformUUID/ { print $4 }' ||
+    true
 }
 
 process_start() {
   # $1: a pid. Prints when it started, or nothing if it is gone. A reused pid
   # has another start time, so the pair identifies one process.
-  ps -o lstart= -p "$1" 2>/dev/null | sed 's/^ *//; s/ *$//'
+  # C locale and UTC: the string must not depend on the environment of the run.
+  LC_ALL=C TZ=UTC0 ps -o lstart= -p "$1" 2>/dev/null | sed 's/^ *//; s/ *$//'
 }
 
 wait_for_redis() {
@@ -77,15 +77,17 @@ if command -v docker >/dev/null; then
   # A run that was killed (SIGKILL, a tool timeout) never reaches its trap and
   # leaves its container behind. Remove the ones whose script is no longer running.
   # The labels name the machine and the process that started each container.
-  machine="$(machine_id)"
-  docker ps -a --filter "label=testbox.test.machine=$machine" \
-    --format '{{.Names}}{{"\t"}}{{.Label "testbox.test.pid"}}{{"\t"}}{{.Label "testbox.test.start"}}' |
-    while IFS=$'\t' read -r stale pid start; do
-      if [ -z "$start" ] || [ "$(process_start "$pid")" != "$start" ]; then
-        docker rm -f "$stale" >/dev/null 2>&1 || true
-        echo "tests: removed stale $stale" >&2
-      fi
-    done
+  machine="$(machine_id | head -n 1)"
+  if [ -n "$machine" ]; then
+    docker ps -a --filter "label=testbox.test.machine=$machine" \
+      --format '{{.Names}}{{"\t"}}{{.Label "testbox.test.pid"}}{{"\t"}}{{.Label "testbox.test.start"}}' |
+      while IFS=$'\t' read -r stale pid start; do
+        if [ -z "$start" ] || [ "$(process_start "$pid")" != "$start" ]; then
+          docker rm -f "$stale" >/dev/null 2>&1 || true
+          echo "tests: removed stale $stale" >&2
+        fi
+      done
+  fi
   name="testbox-test-redis-$$"
   # Host port 0: Docker picks a free one.
   docker run -d --rm --name "$name" -p 127.0.0.1:0:6379 \
