@@ -33,7 +33,17 @@ describe('worker capabilities', () => {
       tools: ['xcodegen', 'pnpm'],
       extra: ['large-disk'],
     });
-    expect(labels).toEqual(['macos', 'arm64', 'node', 'pnpm', 'xcodegen', 'xcode', 'xcode-16.2', 'ios-simulator', 'large-disk']);
+    expect(labels).toEqual([
+      'macos',
+      'arm64',
+      'node',
+      'pnpm',
+      'xcodegen',
+      'xcode',
+      'xcode-16.2',
+      'ios-simulator',
+      'large-disk',
+    ]);
   });
 
   it('labels the tools it finds on PATH, in a fixed order', async () => {

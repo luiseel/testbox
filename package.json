@@ -1,12 +1,8 @@
 {
   "name": "testbox",
-  "private": true,
   "version": "0.1.0",
+  "private": true,
   "description": "A self-hosted machine for coding agents to run builds and tests on. Copies the working tree to a worker, runs a command, and returns the log and an exit code; with --json, as NDJSON with a hint on failure.",
-  "packageManager": "pnpm@10.33.4",
-  "engines": {
-    "node": "22.x"
-  },
   "scripts": {
     "build": "tsrs -b",
     "typecheck": "tsrs -b --pretty false",
@@ -21,7 +17,15 @@
     "oxlint": "1.89.0",
     "tsrs": "0.18.0-ts7.1.0-dev.20260929"
   },
+  "engines": {
+    "node": "22.x"
+  },
+  "packageManager": "pnpm@10.33.4",
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild", "@nestjs/core", "msgpackr-extract"]
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "@nestjs/core",
+      "msgpackr-extract"
+    ]
   }
 }

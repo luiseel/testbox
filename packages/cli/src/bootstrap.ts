@@ -45,7 +45,10 @@ export function parseResult<T>(stdout: string): T {
 
 /** Last `error:` line, or the last two lines of stderr, so the user sees why. */
 export function failureReason(stderr: string, fallback: string): string {
-  const lines = stderr.split('\n').map((line) => line.trim()).filter(Boolean);
+  const lines = stderr
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
   const error = [...lines].reverse().find((line) => line.startsWith('error: '));
   if (error) return error.slice('error: '.length);
   return lines.slice(-2).join(' / ') || fallback;
@@ -78,7 +81,9 @@ export async function runBootstrap<T>(opts: {
     throw new BootstrapError(`cannot ssh to ${opts.sshHost}: ${failureReason(result.stderr, 'ssh failed')}`);
   }
   if (result.code !== 0) {
-    throw new BootstrapError(`${opts.script} failed on ${opts.sshHost}: ${failureReason(result.stderr, `exit ${result.code}`)}`);
+    throw new BootstrapError(
+      `${opts.script} failed on ${opts.sshHost}: ${failureReason(result.stderr, `exit ${result.code}`)}`,
+    );
   }
   return parseResult<T>(result.stdout);
 }

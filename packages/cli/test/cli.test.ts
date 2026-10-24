@@ -93,28 +93,32 @@ describe('cli', () => {
     const calls: { file: string; args: string[] }[] = [];
     const remote = fakeRemote(calls);
     try {
-      const login = await runCli(['login', '--token', 'token-value-123456', '--api-url', 'http://api.test', '--ssh-host', 'testbox'], {
-        homeDir: home,
-        cwd: project,
-        stdout: { write: (chunk) => stdout.push(chunk) },
-        stderr: { write: (chunk) => stderr.push(chunk) },
-        remote,
-        isTTY: false,
-        signals: new EventEmitter(),
-        prompt: async () => 'c',
-        fetchImpl: async () => new Response(JSON.stringify({ id: 'usr_admin', name: 'admin', role: 'admin' }), { status: 200 }),
-      });
+      const login = await runCli(
+        ['login', '--token', 'token-value-123456', '--api-url', 'http://api.test', '--ssh-host', 'testbox'],
+        {
+          homeDir: home,
+          cwd: project,
+          stdout: { write: (chunk) => stdout.push(chunk) },
+          stderr: { write: (chunk) => stderr.push(chunk) },
+          remote,
+          isTTY: false,
+          signals: new EventEmitter(),
+          prompt: async () => 'c',
+          fetchImpl: async () =>
+            new Response(JSON.stringify({ id: 'usr_admin', name: 'admin', role: 'admin' }), { status: 200 }),
+        },
+      );
       expect(login).toBe(0);
       const configFile = path.join(home, '.config', 'testbox', 'config.json');
       const mode = (await stat(configFile)).mode & 0o777;
       expect(mode).toBe(0o600);
       await chmod(path.dirname(configFile), 0o700);
 
-      await writeFile(
-        path.join(project, 'testbox.yml'),
-        'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n',
+      await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
+      const start = await runCli(
+        ['start', '--direct', '--ssh-host', 'testbox'],
+        io(home, project, remote, stdout, stderr),
       );
-      const start = await runCli(['start', '--direct', '--ssh-host', 'testbox'], io(home, project, remote, stdout, stderr));
       expect(start).toBe(0);
       const create = calls.find((call) => call.file === 'mutagen' && call.args[1] === 'create');
       expect(create?.args[0]).toBe('sync');
@@ -122,12 +126,14 @@ describe('cli', () => {
       expect(create?.args.find((arg) => arg.startsWith('--name='))).toMatch(/^--name=testbox-demo-[0-9a-f]{12}$/);
       expect(create?.args.at(-2)).toBe(project);
       expect(create?.args.at(-1)).toMatch(/^testbox:~\/testbox\/workspaces\/local\/demo\/[0-9a-f]{12}$/);
-      expect(buildMutagenCreateArgs({
-        name: 'demo',
-        source: project,
-        destination: 'testbox:~/testbox/app',
-        ignore: ['node_modules'],
-      })).toContain('--ignore=node_modules');
+      expect(
+        buildMutagenCreateArgs({
+          name: 'demo',
+          source: project,
+          destination: 'testbox:~/testbox/app',
+          ignore: ['node_modules'],
+        }),
+      ).toContain('--ignore=node_modules');
 
       calls.length = 0;
       const failed = await runCli(['verify', 'unit', '--direct', '--json'], {
@@ -137,7 +143,12 @@ describe('cli', () => {
             calls.push({ file, args });
             if (file === 'mutagen') return { code: 0, stdout: '', stderr: '' };
             const command = args[args.length - 1] ?? '';
-            if (command.includes('nodeVersion')) return { code: 0, stdout: JSON.stringify({ nodeVersion: 'v22.0.0', arch: 'x64', platform: 'linux', xcodeVersion: null }), stderr: '' };
+            if (command.includes('nodeVersion'))
+              return {
+                code: 0,
+                stdout: JSON.stringify({ nodeVersion: 'v22.0.0', arch: 'x64', platform: 'linux', xcodeVersion: null }),
+                stderr: '',
+              };
             return { code: 3, stdout: 'nope', stderr: '' };
           },
         },
@@ -208,7 +219,11 @@ describe('cli', () => {
         if (file === 'mutagen') return { code: 0, stdout: '', stderr: '' };
         const command = args.at(-1) ?? '';
         if (command.includes('snapshot-cli')) {
-          return { code: 0, stdout: `${JSON.stringify({ digest: 'ab'.repeat(32), relPath: 'snapshots/snap' })}\n`, stderr: '' };
+          return {
+            code: 0,
+            stdout: `${JSON.stringify({ digest: 'ab'.repeat(32), relPath: 'snapshots/snap' })}\n`,
+            stderr: '',
+          };
         }
         return { code: 0, stdout: '', stderr: '' };
       },
@@ -221,13 +236,18 @@ describe('cli', () => {
           return new Response(JSON.stringify({ id: 'snap', digest: 'ab'.repeat(32) }), { status: 201 });
         }
         if (url.endsWith('/jobs') && init?.method === 'POST') {
-          return new Response(JSON.stringify({ job: { id: 'job_123', state: 'queued', exitCode: null, error: null }, superseded: [] }), { status: 201 });
+          return new Response(
+            JSON.stringify({ job: { id: 'job_123', state: 'queued', exitCode: null, error: null }, superseded: [] }),
+            { status: 201 },
+          );
         }
         if (url.endsWith('/events')) {
           const stream = new ReadableStream({
             start(controller) {
               const enc = new TextEncoder();
-              controller.enqueue(enc.encode('event: log\ndata: {"stream":"stdout","line":"failed assertion","offset":1}\n\n'));
+              controller.enqueue(
+                enc.encode('event: log\ndata: {"stream":"stdout","line":"failed assertion","offset":1}\n\n'),
+              );
               controller.enqueue(enc.encode('event: done\ndata: {"state":"failed","exitCode":2,"error":"exit 2"}\n\n'));
               controller.close();
             },
@@ -238,10 +258,14 @@ describe('cli', () => {
       },
     });
     expect(code).toBe(1);
-    const lines = stdout.join('').trim().split('\n').map((line) => JSON.parse(line) as { type: string; line?: string; exitCode?: number });
+    const lines = stdout
+      .join('')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { type: string; line?: string; exitCode?: number });
     expect(lines.some((line) => line.type === 'log' && line.line === 'failed assertion')).toBe(true);
     expect(lines.at(-1)).toMatchObject({ type: 'summary', state: 'failed', exitCode: 2 });
-    expect(remoteBash("printf %s ok")).toContain('bash -c');
+    expect(remoteBash('printf %s ok')).toContain('bash -c');
     await rm(home, { recursive: true, force: true });
     await rm(project, { recursive: true, force: true });
   });
@@ -256,20 +280,31 @@ describe('cli', () => {
       const sent: unknown[] = [];
       const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
         const url = String(input);
-        if (url.endsWith('/snapshots')) return new Response(JSON.stringify({ id: 'snap', digest: 'ab'.repeat(32) }), { status: 201 });
+        if (url.endsWith('/snapshots'))
+          return new Response(JSON.stringify({ id: 'snap', digest: 'ab'.repeat(32) }), { status: 201 });
         if (url.endsWith('/jobs') && init?.method === 'POST') {
           sent.push((JSON.parse(String(init.body)) as { source?: unknown }).source);
-          return new Response(JSON.stringify({ job: { id: 'job_123', state: 'queued', exitCode: null, error: null }, superseded: [] }), { status: 201 });
+          return new Response(
+            JSON.stringify({ job: { id: 'job_123', state: 'queued', exitCode: null, error: null }, superseded: [] }),
+            { status: 201 },
+          );
         }
         if (url.endsWith('/events')) {
-          return new Response('event: done\ndata: {"state":"succeeded","exitCode":0,"error":null}\n\n', { status: 200 });
+          return new Response('event: done\ndata: {"state":"succeeded","exitCode":0,"error":null}\n\n', {
+            status: 200,
+          });
         }
         return new Response('{}', { status: 200 });
       }) as typeof fetch;
       const remote = (git: (args: string[]) => CommandResult): RemoteRunner => ({
         async run(file, args) {
           if (file === 'git') return git(args);
-          if (file === 'ssh') return { code: 0, stdout: `${JSON.stringify({ digest: 'ab'.repeat(32), relPath: 'snapshots/snap' })}\n`, stderr: '' };
+          if (file === 'ssh')
+            return {
+              code: 0,
+              stdout: `${JSON.stringify({ digest: 'ab'.repeat(32), relPath: 'snapshots/snap' })}\n`,
+              stderr: '',
+            };
           return { code: 0, stdout: '', stderr: '' };
         },
       });
@@ -283,7 +318,9 @@ describe('cli', () => {
       expect(stderr.join('')).toContain(`source: ${project} TGN-811@3edf65d (dirty)\n`);
 
       const noRepo = remote(() => ({ code: 128, stdout: '', stderr: 'fatal: not a git repository' }));
-      expect(await runCli(['verify', 'unit', '--json'], { ...io(home, project, noRepo, stdout, stderr), fetchImpl })).toBe(0);
+      expect(
+        await runCli(['verify', 'unit', '--json'], { ...io(home, project, noRepo, stdout, stderr), fetchImpl }),
+      ).toBe(0);
       expect(sent[1]).toEqual({ path: project });
       expect(stdout.join('')).toContain(JSON.stringify({ type: 'source', path: project }));
     } finally {
@@ -333,7 +370,11 @@ describe('cli', () => {
       async run(file, args) {
         calls.push({ file, args });
         if (file === 'ssh') {
-          return { code: 0, stdout: `${JSON.stringify({ digest: 'ab'.repeat(32), relPath: 'snapshots/snap' })}\n`, stderr: '' };
+          return {
+            code: 0,
+            stdout: `${JSON.stringify({ digest: 'ab'.repeat(32), relPath: 'snapshots/snap' })}\n`,
+            stderr: '',
+          };
         }
         return { code: 0, stdout: '', stderr: '' };
       },
@@ -344,19 +385,27 @@ describe('cli', () => {
         const url = String(input);
         const body = init?.body ? (JSON.parse(String(init.body)) as { targetWorkerId?: string }) : {};
         if (url.endsWith('/workers/select')) {
-          return new Response(JSON.stringify({ worker: { id: 'mac-1', sshHost: 'testbox@mac-1', labels: ['macos', 'xcode'] } }), { status: 201 });
+          return new Response(
+            JSON.stringify({ worker: { id: 'mac-1', sshHost: 'testbox@mac-1', labels: ['macos', 'xcode'] } }),
+            { status: 201 },
+          );
         }
         if (url.endsWith('/snapshots')) {
           return new Response(JSON.stringify({ id: 'snap', digest: 'ab'.repeat(32) }), { status: 201 });
         }
         if (url.endsWith('/jobs') && init?.method === 'POST') {
           pinned = body.targetWorkerId ?? '';
-          return new Response(JSON.stringify({ job: { id: 'job_123', state: 'queued', exitCode: null, error: null }, superseded: [] }), { status: 201 });
+          return new Response(
+            JSON.stringify({ job: { id: 'job_123', state: 'queued', exitCode: null, error: null }, superseded: [] }),
+            { status: 201 },
+          );
         }
         if (url.endsWith('/events')) {
           const stream = new ReadableStream({
             start(controller) {
-              controller.enqueue(new TextEncoder().encode('event: done\ndata: {"state":"succeeded","exitCode":0,"error":null}\n\n'));
+              controller.enqueue(
+                new TextEncoder().encode('event: done\ndata: {"state":"succeeded","exitCode":0,"error":null}\n\n'),
+              );
               controller.close();
             },
           });
@@ -378,7 +427,8 @@ describe('cli', () => {
           JSON.stringify({
             error: {
               code: 'NO_WORKER',
-              message: 'no registered worker can satisfy required labels: macos, xcode; registered: linux-1 [linux, x64]',
+              message:
+                'no registered worker can satisfy required labels: macos, xcode; registered: linux-1 [linux, x64]',
             },
           }),
           { status: 503 },
@@ -400,7 +450,9 @@ describe('cli', () => {
     try {
       for (const dir of [main, worktree]) {
         await writeFile(path.join(dir, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
-        expect(await runCli(['start', '--direct', '--ssh-host', 'testbox'], io(home, dir, mutagen.remote, stdout, stderr))).toBe(0);
+        expect(
+          await runCli(['start', '--direct', '--ssh-host', 'testbox'], io(home, dir, mutagen.remote, stdout, stderr)),
+        ).toBe(0);
       }
       expect(mutagen.created.map((session) => session.source)).toEqual([main, worktree]);
       const [first, second] = mutagen.created;
@@ -423,7 +475,12 @@ describe('cli', () => {
     await mkdir(path.join(home, '.config', 'testbox'), { recursive: true });
     await writeFile(
       path.join(home, '.config', 'testbox', 'config.json'),
-      JSON.stringify({ apiUrl: 'http://api.test', token: 'user-token-123456', sshHost: 'testbox', remoteRoot: '~/testbox' }),
+      JSON.stringify({
+        apiUrl: 'http://api.test',
+        token: 'user-token-123456',
+        sshHost: 'testbox',
+        remoteRoot: '~/testbox',
+      }),
     );
     await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
     const workspaces = new Map<string, { id: string; stagingRel: string; project: string; ownerId: string }>();
@@ -440,17 +497,26 @@ describe('cli', () => {
       const match = /\/v1\/workspaces\/([^/]+)$/.exec(url);
       if (match && init?.method === 'GET') {
         const workspace = workspaces.get(match[1] ?? '');
-        if (!workspace) return new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'workspace not found' } }), { status: 404 });
+        if (!workspace)
+          return new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'workspace not found' } }), {
+            status: 404,
+          });
         return new Response(JSON.stringify(workspace), { status: 200 });
       }
       if (url.endsWith('/workers/select')) {
-        return new Response(JSON.stringify({ worker: { id: 'linux-1', sshHost: 'testbox@linux-1', labels: [] } }), { status: 201 });
+        return new Response(JSON.stringify({ worker: { id: 'linux-1', sshHost: 'testbox@linux-1', labels: [] } }), {
+          status: 201,
+        });
       }
       return new Response('{}', { status: 200 });
     }) as typeof fetch;
     const mutagen = fakeMutagen();
     const readState = async () =>
-      JSON.parse(await readFile(path.join(project, '.testbox', 'workspace.json'), 'utf8')) as { id: string; sessionName: string; stagingRel: string };
+      JSON.parse(await readFile(path.join(project, '.testbox', 'workspace.json'), 'utf8')) as {
+        id: string;
+        sessionName: string;
+        stagingRel: string;
+      };
     try {
       expect(await runCli(['start'], { ...io(home, project, mutagen.remote, stdout, stderr), fetchImpl })).toBe(0);
       const first = await readState();
@@ -511,7 +577,10 @@ describe('cli', () => {
       }
       if (match && init?.method === 'GET') {
         const workspace = workspaces.get(match[1] ?? '');
-        if (!workspace) return new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'workspace not found' } }), { status: 404 });
+        if (!workspace)
+          return new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'workspace not found' } }), {
+            status: 404,
+          });
         return new Response(JSON.stringify(workspace), { status: 200 });
       }
       if (url.endsWith('/workers/select')) {
@@ -521,10 +590,19 @@ describe('cli', () => {
     }) as typeof fetch;
     const mutagen = fakeMutagen();
     const readState = async (dir: string) =>
-      JSON.parse(await readFile(path.join(dir, '.testbox', 'workspace.json'), 'utf8')) as { id: string; sessionName: string; sshHost: string };
+      JSON.parse(await readFile(path.join(dir, '.testbox', 'workspace.json'), 'utf8')) as {
+        id: string;
+        sessionName: string;
+        sshHost: string;
+      };
     try {
       // An old state file: the workspace still uses the shared folder of the old layout.
-      workspaces.set('ws_old', { id: 'ws_old', stagingRel: 'workspaces/usr_abc/demo', project: 'demo', ownerId: 'usr_abc' });
+      workspaces.set('ws_old', {
+        id: 'ws_old',
+        stagingRel: 'workspaces/usr_abc/demo',
+        project: 'demo',
+        ownerId: 'usr_abc',
+      });
       await mkdir(path.join(project, '.testbox'), { recursive: true });
       await writeFile(
         path.join(project, '.testbox', 'workspace.json'),
@@ -541,7 +619,10 @@ describe('cli', () => {
           sessions: { 'linux-1': { sessionName: 'testbox-demo-ws-old-linux-1', sshHost: host } },
         }),
       );
-      mutagen.live.set('testbox-demo-ws-old-linux-1', { source: project, destination: `${host}:~/testbox/workspaces/usr_abc/demo` });
+      mutagen.live.set('testbox-demo-ws-old-linux-1', {
+        source: project,
+        destination: `${host}:~/testbox/workspaces/usr_abc/demo`,
+      });
       expect(await runCli(['start'], { ...io(home, project, mutagen.remote, stdout, stderr), fetchImpl })).toBe(0);
       const first = await readState(project);
       expect(first.id).toBe('ws_1');
@@ -573,13 +654,7 @@ describe('cli', () => {
   });
 });
 
-function io(
-  home: string,
-  project: string,
-  remote: RemoteRunner,
-  stdout: string[],
-  stderr: string[],
-) {
+function io(home: string, project: string, remote: RemoteRunner, stdout: string[], stderr: string[]) {
   return {
     homeDir: home,
     cwd: project,
@@ -599,7 +674,12 @@ async function writeQueuedSetup(home: string, project: string): Promise<void> {
   await mkdir(path.join(home, '.config', 'testbox'), { recursive: true });
   await writeFile(
     path.join(home, '.config', 'testbox', 'config.json'),
-    JSON.stringify({ apiUrl: 'http://api.test', token: 'user-token-123456', sshHost: 'testbox', remoteRoot: '~/testbox' }),
+    JSON.stringify({
+      apiUrl: 'http://api.test',
+      token: 'user-token-123456',
+      sshHost: 'testbox',
+      remoteRoot: '~/testbox',
+    }),
   );
   await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
   await mkdir(path.join(project, '.testbox'), { recursive: true });
@@ -642,7 +722,11 @@ function fakeMutagen() {
         live.set(name, session);
         created.push({ name, ...session });
       } else if (verb === 'list') {
-        const sessions = [...live].map(([name, session]) => ({ name, alpha: { path: session.source }, beta: { path: session.destination } }));
+        const sessions = [...live].map(([name, session]) => ({
+          name,
+          alpha: { path: session.source },
+          beta: { path: session.destination },
+        }));
         return { code: 0, stdout: JSON.stringify(sessions), stderr: '' };
       } else if (verb === 'terminate') {
         const name = args.at(-1) ?? '';

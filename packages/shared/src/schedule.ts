@@ -40,12 +40,8 @@ export function explainUnsatisfiable(
   return `no registered worker can satisfy required labels: ${need}; registered: ${registered}`;
 }
 
-export function rankQueuedJobs<T extends { priority: number; createdAt: number; id: string }>(
-  jobs: readonly T[],
-): T[] {
-  return [...jobs].sort(
-    (a, b) => b.priority - a.priority || a.createdAt - b.createdAt || a.id.localeCompare(b.id),
-  );
+export function rankQueuedJobs<T extends { priority: number; createdAt: number; id: string }>(jobs: readonly T[]): T[] {
+  return [...jobs].sort((a, b) => b.priority - a.priority || a.createdAt - b.createdAt || a.id.localeCompare(b.id));
 }
 
 export function toPlacementWorkers(workers: readonly WorkerRecord[], jobs: readonly JobRecord[]): PlacementWorker[] {
@@ -154,32 +150,36 @@ export async function claimNextJob(
   heartbeatTtlMs: number,
   leaseMs: number,
 ): Promise<JobRecord | null> {
-  return store.withLock('scheduler', async () => {
-    const workers = await store.listWorkers();
-    const records = await store.listAllJobs();
-    const now = clock();
-    const placement = toPlacementWorkers(workers, records);
-    const me = placement.find((worker) => worker.id === workerId);
-    if (!me || !workerIsHealthy(me, now, heartbeatTtlMs)) return null;
-    if (me.active >= me.capacity) return null;
+  return store.withLock(
+    'scheduler',
+    async () => {
+      const workers = await store.listWorkers();
+      const records = await store.listAllJobs();
+      const now = clock();
+      const placement = toPlacementWorkers(workers, records);
+      const me = placement.find((worker) => worker.id === workerId);
+      if (!me || !workerIsHealthy(me, now, heartbeatTtlMs)) return null;
+      if (me.active >= me.capacity) return null;
 
-    const queued = rankQueuedJobs(records.filter((job) => job.state === 'queued'));
-    const affinities = await store.getWorkspaceAffinities(queued.map((job) => job.workspaceId));
-    for (const job of queued) {
-      const affinity = affinities.get(job.workspaceId) ?? null;
-      const chosen = chooseWorker(job, placement, affinity, now, heartbeatTtlMs);
-      if (!chosen || chosen.id !== workerId) continue;
-      const assignedAt = clock();
-      const result = await store.transition(job.id, ['queued'], 'assigned', {
-        workerId,
-        attemptId: `attempt_${job.id}`,
-        assignedAt,
-        leaseExpiresAt: assignedAt + leaseMs,
-      });
-      if (!result.ok) continue;
-      await store.setWorkspaceAffinity(job.workspaceId, workerId);
-      return store.getJob(job.id);
-    }
-    return null;
-  }, CLAIM_LOCK_TTL_MS);
+      const queued = rankQueuedJobs(records.filter((job) => job.state === 'queued'));
+      const affinities = await store.getWorkspaceAffinities(queued.map((job) => job.workspaceId));
+      for (const job of queued) {
+        const affinity = affinities.get(job.workspaceId) ?? null;
+        const chosen = chooseWorker(job, placement, affinity, now, heartbeatTtlMs);
+        if (!chosen || chosen.id !== workerId) continue;
+        const assignedAt = clock();
+        const result = await store.transition(job.id, ['queued'], 'assigned', {
+          workerId,
+          attemptId: `attempt_${job.id}`,
+          assignedAt,
+          leaseExpiresAt: assignedAt + leaseMs,
+        });
+        if (!result.ok) continue;
+        await store.setWorkspaceAffinity(job.workspaceId, workerId);
+        return store.getJob(job.id);
+      }
+      return null;
+    },
+    CLAIM_LOCK_TTL_MS,
+  );
 }

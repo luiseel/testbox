@@ -4,12 +4,12 @@ ignore:
   - .git
   - node_modules
   - .env
-  - ".env.*"
+  - '.env.*'
   - .testbox
-  - "**/*.log"
-  - "**/node_modules"
-  - "**/dist"
-  - "**/*.tsbuildinfo"
+  - '**/*.log'
+  - '**/node_modules'
+  - '**/dist'
+  - '**/*.tsbuildinfo'
   - coverage
   - tmp
   - data

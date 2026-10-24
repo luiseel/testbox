@@ -12,9 +12,24 @@ import type { CommandResult, RemoteRunner } from '../src/remote';
  * a workspace that starts itself, and the job log on disk.
  */
 
-type Line = { type: string; line?: string; state?: string; exit?: number; hint?: string; logFile?: string; error?: string };
+type Line = {
+  type: string;
+  line?: string;
+  state?: string;
+  exit?: number;
+  hint?: string;
+  logFile?: string;
+  error?: string;
+};
 
-function io(home: string, cwd: string, remote: RemoteRunner, stdout: string[], stderr: string[], fetchImpl?: typeof fetch) {
+function io(
+  home: string,
+  cwd: string,
+  remote: RemoteRunner,
+  stdout: string[],
+  stderr: string[],
+  fetchImpl?: typeof fetch,
+) {
   return {
     homeDir: home,
     cwd,
@@ -29,7 +44,12 @@ function io(home: string, cwd: string, remote: RemoteRunner, stdout: string[], s
 }
 
 function jsonLines(stdout: string[]): Line[] {
-  return stdout.join('').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as Line);
+  return stdout
+    .join('')
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as Line);
 }
 
 const quietRemote: RemoteRunner = {
@@ -37,7 +57,11 @@ const quietRemote: RemoteRunner = {
     if (file === 'mutagen' && args[1] === 'list') return { code: 0, stdout: '[]', stderr: '' };
     const command = args.at(-1) ?? '';
     if (command.includes('snapshot-cli')) {
-      return { code: 0, stdout: `${JSON.stringify({ digest: 'ab'.repeat(32), relPath: 'snapshots/snap' })}\n`, stderr: '' };
+      return {
+        code: 0,
+        stdout: `${JSON.stringify({ digest: 'ab'.repeat(32), relPath: 'snapshots/snap' })}\n`,
+        stderr: '',
+      };
     }
     return { code: 0, stdout: '', stderr: '' };
   },
@@ -58,14 +82,23 @@ function fakeApi(seen: string[]): typeof fetch {
     const method = init?.method ?? 'GET';
     seen.push(`${method} ${new URL(url).pathname}`);
     if (url.endsWith('/workspaces') && method === 'POST') {
-      return new Response(JSON.stringify({ id: 'ws_new', project: 'demo', stagingRel: 'workspaces/usr_1/demo/ws_new' }), { status: 201 });
+      return new Response(
+        JSON.stringify({ id: 'ws_new', project: 'demo', stagingRel: 'workspaces/usr_1/demo/ws_new' }),
+        { status: 201 },
+      );
     }
     if (url.includes('/workers/select')) {
-      return new Response(JSON.stringify({ worker: { id: 'mac-1', sshHost: 'dev@10.0.0.5', labels: ['macos'] } }), { status: 200 });
+      return new Response(JSON.stringify({ worker: { id: 'mac-1', sshHost: 'dev@10.0.0.5', labels: ['macos'] } }), {
+        status: 200,
+      });
     }
-    if (url.endsWith('/snapshots')) return new Response(JSON.stringify({ id: 'snap', digest: 'ab'.repeat(32) }), { status: 201 });
+    if (url.endsWith('/snapshots'))
+      return new Response(JSON.stringify({ id: 'snap', digest: 'ab'.repeat(32) }), { status: 201 });
     if (url.endsWith('/jobs') && method === 'POST') {
-      return new Response(JSON.stringify({ job: { id: 'job_9', state: 'queued', exitCode: null, error: null }, superseded: [] }), { status: 201 });
+      return new Response(
+        JSON.stringify({ job: { id: 'job_9', state: 'queued', exitCode: null, error: null }, superseded: [] }),
+        { status: 201 },
+      );
     }
     if (url.endsWith('/events')) {
       return new Response(
@@ -91,7 +124,10 @@ describe('agent-facing cli', () => {
       expect(jsonLines(stdout).at(-1)).toMatchObject({ type: 'summary', state: 'error', exit: 2 });
       expect(jsonLines(stdout).at(-1)?.error).toContain('testbox.yml not found');
 
-      await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n  lint:\n    cmd: pnpm lint\n');
+      await writeFile(
+        path.join(project, 'testbox.yml'),
+        'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n  lint:\n    cmd: pnpm lint\n',
+      );
       stdout.length = 0;
       expect(await runCli(['verify', 'nope', '--json'], io(home, project, quietRemote, stdout, stderr))).toBe(2);
       const summary = jsonLines(stdout).at(-1);
@@ -122,7 +158,12 @@ describe('agent-facing cli', () => {
     try {
       await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
       expect(await runCli(['verify', 'unit', '--json'], io(home, project, quietRemote, stdout, stderr))).toBe(20);
-      expect(jsonLines(stdout).at(-1)).toMatchObject({ type: 'summary', state: 'error', error: 'not logged in', exit: 20 });
+      expect(jsonLines(stdout).at(-1)).toMatchObject({
+        type: 'summary',
+        state: 'error',
+        error: 'not logged in',
+        exit: 20,
+      });
       expect(jsonLines(stdout).at(-1)?.hint).toContain('testbox setup');
 
       stdout.length = 0;
@@ -143,9 +184,14 @@ describe('agent-facing cli', () => {
     try {
       await loggedIn(home);
       await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
-      expect(await runCli(['verify', 'unit', '--json'], io(home, project, quietRemote, stdout, stderr, fakeApi(seen)))).toBe(0);
+      expect(
+        await runCli(['verify', 'unit', '--json'], io(home, project, quietRemote, stdout, stderr, fakeApi(seen))),
+      ).toBe(0);
       expect(seen).toContain('POST /v1/workspaces');
-      const state = JSON.parse(await readFile(path.join(project, '.testbox', 'workspace.json'), 'utf8')) as { id: string; configDir: string };
+      const state = JSON.parse(await readFile(path.join(project, '.testbox', 'workspace.json'), 'utf8')) as {
+        id: string;
+        configDir: string;
+      };
       expect(state.id).toBe('ws_new');
       expect(state.configDir).toBe(project);
       const lines = jsonLines(stdout);
@@ -154,7 +200,9 @@ describe('agent-facing cli', () => {
 
       // A second run reuses the workspace: no new one is made.
       seen.length = 0;
-      expect(await runCli(['verify', 'unit', '--json'], io(home, project, quietRemote, stdout, stderr, fakeApi(seen)))).toBe(0);
+      expect(
+        await runCli(['verify', 'unit', '--json'], io(home, project, quietRemote, stdout, stderr, fakeApi(seen))),
+      ).toBe(0);
       expect(seen).not.toContain('POST /v1/workspaces');
     } finally {
       await rm(home, { recursive: true, force: true });
@@ -170,7 +218,12 @@ describe('agent-facing cli', () => {
     try {
       await loggedIn(home);
       await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
-      expect(await runCli(['verify', 'unit', '--json', '--quiet'], io(home, project, quietRemote, stdout, stderr, fakeApi([])))).toBe(0);
+      expect(
+        await runCli(
+          ['verify', 'unit', '--json', '--quiet'],
+          io(home, project, quietRemote, stdout, stderr, fakeApi([])),
+        ),
+      ).toBe(0);
       const lines = jsonLines(stdout);
       expect(lines.some((line) => line.type === 'log')).toBe(false);
       const summary = lines.at(-1);
@@ -180,7 +233,9 @@ describe('agent-facing cli', () => {
       expect(await readFile(logFile, 'utf8')).toBe('1 passed\nwarn: slow\n');
 
       stdout.length = 0;
-      expect(await runCli(['verify', 'unit', '--json'], io(home, project, quietRemote, stdout, stderr, fakeApi([])))).toBe(0);
+      expect(
+        await runCli(['verify', 'unit', '--json'], io(home, project, quietRemote, stdout, stderr, fakeApi([]))),
+      ).toBe(0);
       expect(jsonLines(stdout).filter((line) => line.type === 'log')).toHaveLength(2);
       expect(jsonLines(stdout).at(-1)?.logFile).toBe(logFile);
     } finally {
@@ -214,7 +269,13 @@ describe('agent-facing cli', () => {
         project: 'demo',
         profiles: [
           { name: 'unit', command: 'pnpm test', requires: [], artifacts: [], links: [] },
-          { name: 'ios', command: 'xcodebuild test', requires: ['macos', 'xcode'], artifacts: ['*.xcresult/**'], links: ['api'] },
+          {
+            name: 'ios',
+            command: 'xcodebuild test',
+            requires: ['macos', 'xcode'],
+            artifacts: ['*.xcresult/**'],
+            links: ['api'],
+          },
         ],
       });
       expect(lines.at(-1)).toMatchObject({ type: 'summary', ok: true, exit: 0 });
@@ -253,8 +314,12 @@ function openStreamApi(seen: string[], onStream: () => void): typeof fetch {
     const signal = init?.signal;
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
-        controller.enqueue(new TextEncoder().encode('event: log\ndata: {"stream":"stdout","line":"building","offset":1}\n\n'));
-        signal?.addEventListener('abort', () => controller.error(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+        controller.enqueue(
+          new TextEncoder().encode('event: log\ndata: {"stream":"stdout","line":"building","offset":1}\n\n'),
+        );
+        signal?.addEventListener('abort', () =>
+          controller.error(Object.assign(new Error('aborted'), { name: 'AbortError' })),
+        );
       },
     });
     setTimeout(onStream, 0);
@@ -360,7 +425,14 @@ describe('agent-facing cli: detach and run --profile', () => {
     try {
       await loggedIn(home);
       await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
-      const cli = io(home, project, quietRemote, stdout, [], openStreamApi(seen, () => undefined));
+      const cli = io(
+        home,
+        project,
+        quietRemote,
+        stdout,
+        [],
+        openStreamApi(seen, () => undefined),
+      );
       // The status event is written between the submit and follow; the signal lands while the log file opens.
       cli.stdout = {
         write: (chunk: string) => {
@@ -392,11 +464,16 @@ describe('agent-facing cli: detach and run --profile', () => {
       cli.fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
         const url = String(input);
         // The stream closes with no done event, so follow asks for the job; the signal lands during that request.
-        if (url.endsWith('/events')) return new Response('event: log\ndata: {"stream":"stdout","line":"building","offset":1}\n\n', { status: 200 });
+        if (url.endsWith('/events'))
+          return new Response('event: log\ndata: {"stream":"stdout","line":"building","offset":1}\n\n', {
+            status: 200,
+          });
         if (url.endsWith('/jobs/job_9') && (init?.method ?? 'GET') === 'GET') {
           // The request stalls; only the detach's abort ends it.
           return new Promise<Response>((_, reject) => {
-            init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+            init?.signal?.addEventListener('abort', () =>
+              reject(Object.assign(new Error('aborted'), { name: 'AbortError' })),
+            );
             cli.signals.emit('SIGTERM');
           });
         }
@@ -423,7 +500,10 @@ describe('agent-facing cli: detach and run --profile', () => {
       const cli = io(home, project, quietRemote, stdout, []);
       const base = fakeApi(seen);
       cli.fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
-        if (String(input).endsWith('/events')) return new Response(JSON.stringify({ error: { code: 'INTERNAL', message: 'stream broke' } }), { status: 500 });
+        if (String(input).endsWith('/events'))
+          return new Response(JSON.stringify({ error: { code: 'INTERNAL', message: 'stream broke' } }), {
+            status: 500,
+          });
         return base(input, init);
       }) as typeof fetch;
       expect(await runCli(['verify', 'unit', '--json', '--quiet'], cli)).toBe(1);
@@ -443,7 +523,12 @@ describe('agent-facing cli: detach and run --profile', () => {
     try {
       await loggedIn(home);
       await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
-      expect(await runCli(['verify', 'unit', '--json', '--detach'], io(home, project, quietRemote, stdout, [], fakeApi(seen)))).toBe(0);
+      expect(
+        await runCli(
+          ['verify', 'unit', '--json', '--detach'],
+          io(home, project, quietRemote, stdout, [], fakeApi(seen)),
+        ),
+      ).toBe(0);
       expect(jsonLines(stdout).at(-1)).toMatchObject({
         type: 'summary',
         jobId: 'job_9',
@@ -476,12 +561,27 @@ describe('agent-facing cli: detach and run --profile', () => {
         if (String(input).endsWith('/jobs') && init?.method === 'POST') jobs.push(JSON.parse(String(init.body)));
         return api(input, init);
       }) as typeof fetch;
-      expect(await runCli(['run', 'pnpm test -- one', '--profile', 'unit', '--json'], io(home, project, quietRemote, stdout, [], fetchImpl))).toBe(0);
-      expect(jobs[0]).toMatchObject({ command: 'pnpm test -- one', profile: 'unit', requires: ['linux'], artifactGlobs: ['coverage/**'] });
+      expect(
+        await runCli(
+          ['run', 'pnpm test -- one', '--profile', 'unit', '--json'],
+          io(home, project, quietRemote, stdout, [], fetchImpl),
+        ),
+      ).toBe(0);
+      expect(jobs[0]).toMatchObject({
+        command: 'pnpm test -- one',
+        profile: 'unit',
+        requires: ['linux'],
+        artifactGlobs: ['coverage/**'],
+      });
 
       stdout.length = 0;
       seen.length = 0;
-      expect(await runCli(['run', 'pnpm test', '--profile', 'nope', '--json'], io(home, project, quietRemote, stdout, [], fakeApi(seen)))).toBe(2);
+      expect(
+        await runCli(
+          ['run', 'pnpm test', '--profile', 'nope', '--json'],
+          io(home, project, quietRemote, stdout, [], fakeApi(seen)),
+        ),
+      ).toBe(2);
       const summary = jsonLines(stdout).at(-1);
       expect(summary).toMatchObject({ type: 'summary', state: 'error', exit: 2 });
       expect(summary?.error).toContain('unknown profile nope; the profiles in');
@@ -504,7 +604,12 @@ describe('agent-facing cli: the summary contract on every path', () => {
     try {
       await loggedIn(home);
       await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
-      expect(await runCli(['verify', 'unit', '--json', '--timeout', 'soon'], io(home, project, quietRemote, stdout, stderr, fakeApi(seen)))).toBe(2);
+      expect(
+        await runCli(
+          ['verify', 'unit', '--json', '--timeout', 'soon'],
+          io(home, project, quietRemote, stdout, stderr, fakeApi(seen)),
+        ),
+      ).toBe(2);
       expect(seen).toEqual([]);
       expect(jsonLines(stdout).at(-1)).toMatchObject({ type: 'summary', state: 'error', exit: 2 });
       expect(jsonLines(stdout).at(-1)?.error).toContain('invalid --timeout');
@@ -525,7 +630,9 @@ describe('agent-facing cli: the summary contract on every path', () => {
       // A file where the logs directory must be: mkdir fails, and so does the open.
       await mkdir(path.join(project, '.testbox'), { recursive: true });
       await writeFile(path.join(project, '.testbox', 'logs'), 'not a directory');
-      expect(await runCli(['verify', 'unit', '--json'], io(home, project, quietRemote, stdout, stderr, fakeApi([])))).toBe(0);
+      expect(
+        await runCli(['verify', 'unit', '--json'], io(home, project, quietRemote, stdout, stderr, fakeApi([]))),
+      ).toBe(0);
       const lines = jsonLines(stdout);
       expect(lines.filter((line) => line.type === 'log')).toHaveLength(2);
       expect(lines.some((line) => line.type === 'info' && line.line?.startsWith('cannot write'))).toBe(true);
@@ -546,10 +653,14 @@ describe('agent-facing cli: the summary contract on every path', () => {
     const sshHosts: string[] = [];
     try {
       await loggedIn(home);
-      await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  ios:\n    cmd: xcodebuild test\n    requires: [macos, xcode]\n');
+      await writeFile(
+        path.join(project, 'testbox.yml'),
+        'project: demo\nprofiles:\n  ios:\n    cmd: xcodebuild test\n    requires: [macos, xcode]\n',
+      );
       const api = fakeApi([]);
       const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
-        if (String(input).includes('/workers/select')) selects.push((JSON.parse(String(init?.body)) as { requires: string[] }).requires);
+        if (String(input).includes('/workers/select'))
+          selects.push((JSON.parse(String(init?.body)) as { requires: string[] }).requires);
         return api(input, init);
       }) as typeof fetch;
       const remote: RemoteRunner = {
@@ -580,11 +691,21 @@ describe('agent-facing cli: the summary contract on every path', () => {
         throw new Error('socket hang up');
       }) as typeof fetch;
       expect(await runCli(['doctor', '--json'], io(home, project, quietRemote, stdout, stderr, broken))).toBe(1);
-      expect(jsonLines(stdout).at(-1)).toMatchObject({ type: 'summary', state: 'error', error: 'socket hang up', exit: 1 });
+      expect(jsonLines(stdout).at(-1)).toMatchObject({
+        type: 'summary',
+        state: 'error',
+        error: 'socket hang up',
+        exit: 1,
+      });
 
       stdout.length = 0;
       expect(await runCli(['init', '--json'], io(home, project, quietRemote, stdout, stderr))).toBe(0);
-      expect(jsonLines(stdout).at(-1)).toMatchObject({ type: 'summary', ok: true, exit: 0, file: path.join(project, 'testbox.yml') });
+      expect(jsonLines(stdout).at(-1)).toMatchObject({
+        type: 'summary',
+        ok: true,
+        exit: 0,
+        file: path.join(project, 'testbox.yml'),
+      });
       expect(stderr.join('')).not.toContain('testbox start');
 
       stdout.length = 0;
@@ -593,13 +714,25 @@ describe('agent-facing cli: the summary contract on every path', () => {
 
       const jobApi = (async (input: string | URL | Request) => {
         const url = String(input);
-        if (url.endsWith('/logs')) return new Response(JSON.stringify({ lines: [{ stream: 'stdout', line: 'boom' }] }), { status: 200 });
-        if (url.endsWith('/events')) return new Response('event: done\ndata: {"state":"failed","exitCode":1,"error":null}\n\n', { status: 200 });
-        return new Response(JSON.stringify({ job: { id: 'job_7', state: 'failed', exitCode: 1, error: null } }), { status: 200 });
+        if (url.endsWith('/logs'))
+          return new Response(JSON.stringify({ lines: [{ stream: 'stdout', line: 'boom' }] }), { status: 200 });
+        if (url.endsWith('/events'))
+          return new Response('event: done\ndata: {"state":"failed","exitCode":1,"error":null}\n\n', { status: 200 });
+        return new Response(JSON.stringify({ job: { id: 'job_7', state: 'failed', exitCode: 1, error: null } }), {
+          status: 200,
+        });
       }) as typeof fetch;
       stdout.length = 0;
-      expect(await runCli(['status', 'job_7', '--json'], io(home, project, quietRemote, stdout, stderr, jobApi))).toBe(1);
-      expect(jsonLines(stdout).at(-1)).toMatchObject({ type: 'summary', jobId: 'job_7', state: 'failed', exitCode: 1, exit: 1 });
+      expect(await runCli(['status', 'job_7', '--json'], io(home, project, quietRemote, stdout, stderr, jobApi))).toBe(
+        1,
+      );
+      expect(jsonLines(stdout).at(-1)).toMatchObject({
+        type: 'summary',
+        jobId: 'job_7',
+        state: 'failed',
+        exitCode: 1,
+        exit: 1,
+      });
       expect(jsonLines(stdout).at(-1)?.hint).toContain('fix the code');
 
       stdout.length = 0;
@@ -609,8 +742,14 @@ describe('agent-facing cli: the summary contract on every path', () => {
 
       // logs --follow inside the repo writes the file too.
       stdout.length = 0;
-      expect(await runCli(['logs', 'job_7', '--follow', '--json'], io(home, project, quietRemote, stdout, stderr, jobApi))).toBe(1);
-      expect(jsonLines(stdout).at(-1)).toMatchObject({ type: 'summary', exit: 1, logFile: path.join(project, '.testbox', 'logs', 'job_7.log') });
+      expect(
+        await runCli(['logs', 'job_7', '--follow', '--json'], io(home, project, quietRemote, stdout, stderr, jobApi)),
+      ).toBe(1);
+      expect(jsonLines(stdout).at(-1)).toMatchObject({
+        type: 'summary',
+        exit: 1,
+        logFile: path.join(project, '.testbox', 'logs', 'job_7.log'),
+      });
     } finally {
       await rm(home, { recursive: true, force: true });
       await rm(project, { recursive: true, force: true });
@@ -623,7 +762,10 @@ async function linkedCheckouts(others: Record<string, string | null>): Promise<{
   const root = await mkdtemp(path.join(os.tmpdir(), 'tb-links-'));
   const main = path.join(root, 'interface_TGN-821');
   await mkdir(main);
-  await writeFile(path.join(main, 'testbox.yml'), 'project: interface\nprofiles:\n  ios:\n    cmd: xcodebuild test\n    requires: [macos]\n    links: [api]\n  unit:\n    cmd: make\n');
+  await writeFile(
+    path.join(main, 'testbox.yml'),
+    'project: interface\nprofiles:\n  ios:\n    cmd: xcodebuild test\n    requires: [macos]\n    links: [api]\n  unit:\n    cmd: make\n',
+  );
   for (const [name, config] of Object.entries(others)) {
     await mkdir(path.join(root, name), { recursive: true });
     if (config !== null) await writeFile(path.join(root, name, 'testbox.yml'), config);
@@ -641,7 +783,10 @@ function linkApi(seen: { call: string; body: unknown }[]): typeof fetch {
     seen.push({ call: `${method} ${new URL(url).pathname}`, body });
     if (url.endsWith('/workspaces') && method === 'POST') {
       const project = (body as { project: string }).project;
-      return new Response(JSON.stringify({ id: `ws_${project}`, project, stagingRel: `workspaces/usr_1/${project}/ws_${project}` }), { status: 201 });
+      return new Response(
+        JSON.stringify({ id: `ws_${project}`, project, stagingRel: `workspaces/usr_1/${project}/ws_${project}` }),
+        { status: 201 },
+      );
     }
     return base(input, init);
   }) as typeof fetch;
@@ -653,7 +798,11 @@ function recordingRemote(calls: { file: string; args: string[] }[]): RemoteRunne
     async run(file, args) {
       calls.push({ file, args });
       if ((args.at(-1) ?? '').includes('snapshot-cli')) {
-        return { code: 0, stdout: `${JSON.stringify({ digest: 'ab'.repeat(32), relPath: 'snapshots/snap', workDir: 'interface' })}\n`, stderr: '' };
+        return {
+          code: 0,
+          stdout: `${JSON.stringify({ digest: 'ab'.repeat(32), relPath: 'snapshots/snap', workDir: 'interface' })}\n`,
+          stderr: '',
+        };
       }
       return quietRemote.run(file, args);
     },
@@ -663,17 +812,25 @@ function recordingRemote(calls: { file: string; args: string[] }[]): RemoteRunne
 describe('agent-facing cli: links', () => {
   it('syncs the sibling checkout <link>_<suffix> to the same worker and snapshots it next to this tree', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
-    const { root, main } = await linkedCheckouts({ 'api_TGN-821': 'project: api\nignore: [secret.txt]\n', api: 'project: api\n' });
+    const { root, main } = await linkedCheckouts({
+      'api_TGN-821': 'project: api\nignore: [secret.txt]\n',
+      api: 'project: api\n',
+    });
     const stdout: string[] = [];
     const seen: { call: string; body: unknown }[] = [];
     const calls: { file: string; args: string[] }[] = [];
     try {
       await loggedIn(home);
-      expect(await runCli(['verify', 'ios', '--json'], io(home, main, recordingRemote(calls), stdout, [], linkApi(seen)))).toBe(0);
+      expect(
+        await runCli(['verify', 'ios', '--json'], io(home, main, recordingRemote(calls), stdout, [], linkApi(seen))),
+      ).toBe(0);
       const created = seen.filter((entry) => entry.call === 'POST /v1/workspaces').map((entry) => entry.body);
       expect(created).toEqual([{ project: 'interface' }, { project: 'api' }]);
       const apiDir = path.join(root, 'api_TGN-821');
-      const linkState = JSON.parse(await readFile(path.join(apiDir, '.testbox', 'workspace.json'), 'utf8')) as { id: string; workerId: string };
+      const linkState = JSON.parse(await readFile(path.join(apiDir, '.testbox', 'workspace.json'), 'utf8')) as {
+        id: string;
+        workerId: string;
+      };
       expect(linkState).toMatchObject({ id: 'ws_api', workerId: 'mac-1' });
 
       const snapshot = calls.find((entry) => (entry.args.at(-1) ?? '').includes('snapshot-cli'))?.args.at(-1) ?? '';
@@ -682,7 +839,8 @@ describe('agent-facing cli: links', () => {
       expect(snapshot).toMatch(/--link '\\''api=workspaces\/usr_1\/api\/ws_api'\\''/);
       expect(snapshot).toMatch(/--link-ignore '\\''api=secret.txt'\\''/);
       // Both sessions are paused for the snapshot and resumed after it.
-      const mutagen = (verb: string) => calls.filter((entry) => entry.file === 'mutagen' && entry.args[1] === verb).map((entry) => entry.args[2]);
+      const mutagen = (verb: string) =>
+        calls.filter((entry) => entry.file === 'mutagen' && entry.args[1] === verb).map((entry) => entry.args[2]);
       expect(mutagen('pause')).toHaveLength(2);
       expect(new Set(mutagen('resume'))).toEqual(new Set(mutagen('pause')));
       expect(mutagen('flush')).toHaveLength(2);
@@ -691,7 +849,9 @@ describe('agent-facing cli: links', () => {
       const lines = jsonLines(stdout) as (Line & { links?: unknown })[];
       const source = lines.find((line) => line.type === 'source');
       expect(source?.links).toEqual([{ name: 'api', path: apiDir, dirty: false }]);
-      expect(seen.find((entry) => entry.call === 'POST /v1/jobs')?.body).toMatchObject({ source: { links: [{ name: 'api', path: apiDir }] } });
+      expect(seen.find((entry) => entry.call === 'POST /v1/jobs')?.body).toMatchObject({
+        source: { links: [{ name: 'api', path: apiDir }] },
+      });
       expect(lines.at(-1)).toMatchObject({ type: 'summary', state: 'succeeded', exit: 0 });
     } finally {
       await rm(home, { recursive: true, force: true });
@@ -716,7 +876,9 @@ describe('agent-facing cli: links', () => {
       await mkdir(path.join(root, 'api'));
       stdout.length = 0;
       expect(await runCli(['verify', 'ios', '--json'], io(home, main, quietRemote, stdout, [], linkApi(seen)))).toBe(2);
-      expect(jsonLines(stdout).at(-1)?.error).toBe(`link api: ${path.join(root, 'api')} has no testbox.yml; run testbox init there`);
+      expect(jsonLines(stdout).at(-1)?.error).toBe(
+        `link api: ${path.join(root, 'api')} has no testbox.yml; run testbox init there`,
+      );
       expect(seen).toEqual([]);
     } finally {
       await rm(home, { recursive: true, force: true });
@@ -731,28 +893,58 @@ describe('agent-facing cli: links', () => {
     const seen: { call: string; body: unknown }[] = [];
     try {
       await loggedIn(home);
-      expect(await runCli(['verify', 'ios', '--json', '--link', 'api=../elsewhere/api-fork'], io(home, main, quietRemote, stdout, [], linkApi(seen)))).toBe(0);
-      const source = (jsonLines(stdout) as (Line & { links?: { path: string }[] })[]).find((line) => line.type === 'source');
+      expect(
+        await runCli(
+          ['verify', 'ios', '--json', '--link', 'api=../elsewhere/api-fork'],
+          io(home, main, quietRemote, stdout, [], linkApi(seen)),
+        ),
+      ).toBe(0);
+      const source = (jsonLines(stdout) as (Line & { links?: { path: string }[] })[]).find(
+        (line) => line.type === 'source',
+      );
       expect(source?.links?.[0]?.path).toBe(path.join(root, 'elsewhere', 'api-fork'));
 
       stdout.length = 0;
       seen.length = 0;
-      expect(await runCli(['verify', 'ios', '--json', '--link', 'web=../api'], io(home, main, quietRemote, stdout, [], linkApi(seen)))).toBe(2);
+      expect(
+        await runCli(
+          ['verify', 'ios', '--json', '--link', 'web=../api'],
+          io(home, main, quietRemote, stdout, [], linkApi(seen)),
+        ),
+      ).toBe(2);
       expect(jsonLines(stdout).at(-1)?.error).toBe('--link web: profile ios has no link web; its links are: api');
 
       stdout.length = 0;
-      expect(await runCli(['verify', 'ios', '--json', '--link', 'api=../nope'], io(home, main, quietRemote, stdout, [], linkApi(seen)))).toBe(2);
+      expect(
+        await runCli(
+          ['verify', 'ios', '--json', '--link', 'api=../nope'],
+          io(home, main, quietRemote, stdout, [], linkApi(seen)),
+        ),
+      ).toBe(2);
       expect(jsonLines(stdout).at(-1)?.error).toBe('link api: no checkout at ../nope; fix the path of --link');
 
       stdout.length = 0;
-      expect(await runCli(['verify', 'ios', '--json', '--direct'], io(home, main, quietRemote, stdout, [], linkApi(seen)))).toBe(2);
-      expect(jsonLines(stdout).at(-1)).toMatchObject({ type: 'summary', exit: 2, error: 'links need the control plane; run without --direct' });
+      expect(
+        await runCli(['verify', 'ios', '--json', '--direct'], io(home, main, quietRemote, stdout, [], linkApi(seen))),
+      ).toBe(2);
+      expect(jsonLines(stdout).at(-1)).toMatchObject({
+        type: 'summary',
+        exit: 2,
+        error: 'links need the control plane; run without --direct',
+      });
       expect(seen).toEqual([]);
 
       // run takes its links from --link only.
       stdout.length = 0;
-      expect(await runCli(['run', 'make', '--json', '--link', 'api=../api'], io(home, main, quietRemote, stdout, [], linkApi(seen)))).toBe(0);
-      const runSource = (jsonLines(stdout) as (Line & { links?: { name: string; path: string }[] })[]).find((line) => line.type === 'source');
+      expect(
+        await runCli(
+          ['run', 'make', '--json', '--link', 'api=../api'],
+          io(home, main, quietRemote, stdout, [], linkApi(seen)),
+        ),
+      ).toBe(0);
+      const runSource = (jsonLines(stdout) as (Line & { links?: { name: string; path: string }[] })[]).find(
+        (line) => line.type === 'source',
+      );
       expect(runSource?.links).toMatchObject([{ name: 'api', path: path.join(root, 'api') }]);
     } finally {
       await rm(home, { recursive: true, force: true });
@@ -767,8 +959,15 @@ describe('agent-facing cli: links', () => {
     const seen: { call: string; body: unknown }[] = [];
     try {
       await loggedIn(home);
-      expect(await runCli(['run', 'xcodebuild test -only-testing:One', '--profile', 'ios', '--json'], io(home, main, quietRemote, stdout, [], linkApi(seen)))).toBe(0);
-      const source = (jsonLines(stdout) as (Line & { links?: { name: string }[] })[]).find((line) => line.type === 'source');
+      expect(
+        await runCli(
+          ['run', 'xcodebuild test -only-testing:One', '--profile', 'ios', '--json'],
+          io(home, main, quietRemote, stdout, [], linkApi(seen)),
+        ),
+      ).toBe(0);
+      const source = (jsonLines(stdout) as (Line & { links?: { name: string }[] })[]).find(
+        (line) => line.type === 'source',
+      );
       expect(source?.links).toMatchObject([{ name: 'api' }]);
       expect(seen.find((entry) => entry.call === 'POST /v1/jobs')?.body).toMatchObject({
         command: 'xcodebuild test -only-testing:One',
@@ -787,11 +986,20 @@ describe('agent-facing cli: links', () => {
       await bad(['run', 'make', '--link', 'api'], 'invalid --link api: pass --link <name>=<path>');
       await bad(['run', 'make', '--link', 'api=../api', '--link', 'api=../api'], '--link api is given twice');
       await bad(['run', 'make', '--link', 'api=../api', '--link', 'API=../api'], '--link API is given twice');
-      await bad(['run', 'make', '--link', 'Interface=../api'], '--link Interface: a link cannot have the project name interface');
+      await bad(
+        ['run', 'make', '--link', 'Interface=../api'],
+        '--link Interface: a link cannot have the project name interface',
+      );
       await bad(['run', 'make', '--link', 'api=.'], `link api: ${main} is this checkout`);
-      await bad(['run', 'make', '--link', 'interface=../api'], '--link interface: a link cannot have the project name interface');
+      await bad(
+        ['run', 'make', '--link', 'interface=../api'],
+        '--link interface: a link cannot have the project name interface',
+      );
       await symlink(path.join(root, 'api'), path.join(root, 'api-alias'));
-      await bad(['run', 'make', '--link', 'api=../api', '--link', 'kit=../api-alias'], `link kit: ${path.join(root, 'api-alias')} is the same checkout as link api`);
+      await bad(
+        ['run', 'make', '--link', 'api=../api', '--link', 'kit=../api-alias'],
+        `link kit: ${path.join(root, 'api-alias')} is the same checkout as link api`,
+      );
       const many = Array.from({ length: 21 }, (_, i) => ['--link', `l${i}=../api`]).flat();
       await bad(['run', 'make', ...many], '--link: at most 20 links');
     } finally {
@@ -812,7 +1020,8 @@ describe('agent-facing cli: links', () => {
     const api = (async (input: string | URL | Request, init?: RequestInit) => {
       if (String(input).includes('/workers/select')) {
         selections += 1;
-        const worker = selections <= 2 ? { id: 'mac-1', sshHost: 'dev@10.0.0.5' } : { id: 'mac-2', sshHost: 'dev@10.0.0.6' };
+        const worker =
+          selections <= 2 ? { id: 'mac-1', sshHost: 'dev@10.0.0.5' } : { id: 'mac-2', sshHost: 'dev@10.0.0.6' };
         seen.push({ call: 'POST /v1/workers/select', body: undefined });
         return new Response(JSON.stringify({ worker: { ...worker, labels: ['macos'] } }), { status: 200 });
       }
@@ -820,11 +1029,18 @@ describe('agent-facing cli: links', () => {
     }) as typeof fetch;
     try {
       await loggedIn(home);
-      expect(await runCli(['verify', 'ios', '--json'], io(home, main, recordingRemote(calls), stdout, [], api))).toBe(0);
+      expect(await runCli(['verify', 'ios', '--json'], io(home, main, recordingRemote(calls), stdout, [], api))).toBe(
+        0,
+      );
       expect(selections).toBe(2);
-      const linkState = JSON.parse(await readFile(path.join(root, 'api', '.testbox', 'workspace.json'), 'utf8')) as { sshHost: string; workerId: string };
+      const linkState = JSON.parse(await readFile(path.join(root, 'api', '.testbox', 'workspace.json'), 'utf8')) as {
+        sshHost: string;
+        workerId: string;
+      };
       expect(linkState).toMatchObject({ sshHost: 'dev@10.0.0.5', workerId: 'mac-1' });
-      const creates = calls.filter((entry) => entry.file === 'mutagen' && entry.args[1] === 'create').map((entry) => entry.args.join(' '));
+      const creates = calls
+        .filter((entry) => entry.file === 'mutagen' && entry.args[1] === 'create')
+        .map((entry) => entry.args.join(' '));
       expect(creates).toHaveLength(2);
       for (const create of creates) expect(create).toContain('dev@10.0.0.5:');
     } finally {
@@ -843,24 +1059,30 @@ describe('agent-facing cli: links', () => {
       async run(file, args) {
         calls.push({ file, args });
         const last = args.at(-1) ?? '';
-        if (step === 'snapshot' && last.includes('snapshot-cli')) return { code: 1, stdout: '', stderr: 'rsync: disk full' };
+        if (step === 'snapshot' && last.includes('snapshot-cli'))
+          return { code: 1, stdout: '', stderr: 'rsync: disk full' };
         if (step === 'pause-api' && file === 'mutagen' && args[1] === 'pause' && args[2].includes('-api-')) {
           return { code: 1, stdout: '', stderr: 'session not found' };
         }
         return quietRemote.run(file, args);
       },
     });
-    const mutagen = (verb: string) => calls.filter((entry) => entry.file === 'mutagen' && entry.args[1] === verb).map((entry) => entry.args[2]);
+    const mutagen = (verb: string) =>
+      calls.filter((entry) => entry.file === 'mutagen' && entry.args[1] === verb).map((entry) => entry.args[2]);
     try {
       await loggedIn(home);
-      expect(await runCli(['verify', 'ios', '--json'], io(home, main, failing('snapshot'), stdout, [], linkApi([])))).toBe(10);
+      expect(
+        await runCli(['verify', 'ios', '--json'], io(home, main, failing('snapshot'), stdout, [], linkApi([]))),
+      ).toBe(10);
       expect(jsonLines(stdout).at(-1)).toMatchObject({ type: 'summary', exit: 10, error: 'rsync: disk full' });
       expect(mutagen('pause')).toHaveLength(2);
       expect(new Set(mutagen('resume'))).toEqual(new Set(mutagen('pause')));
 
       calls.length = 0;
       stdout.length = 0;
-      expect(await runCli(['verify', 'ios', '--json'], io(home, main, failing('pause-api'), stdout, [], linkApi([])))).toBe(10);
+      expect(
+        await runCli(['verify', 'ios', '--json'], io(home, main, failing('pause-api'), stdout, [], linkApi([]))),
+      ).toBe(10);
       expect(jsonLines(stdout).at(-1)).toMatchObject({ type: 'summary', exit: 10, error: 'session not found' });
       // The main session was paused and is resumed; the api session never paused, so it is not resumed.
       expect(mutagen('pause')).toHaveLength(2);
@@ -896,7 +1118,11 @@ function directRemote(answer: (command: string) => CommandResult): RemoteRunner 
       if (file !== 'ssh') return quietRemote.run(file, args);
       const command = args.at(-1) ?? '';
       if (command.includes('nodeVersion')) {
-        return { code: 0, stdout: JSON.stringify({ nodeVersion: 'v22.0.0', arch: 'x64', platform: 'linux', xcodeVersion: null }), stderr: '' };
+        return {
+          code: 0,
+          stdout: JSON.stringify({ nodeVersion: 'v22.0.0', arch: 'x64', platform: 'linux', xcodeVersion: null }),
+          stderr: '',
+        };
       }
       if (command.startsWith('mkdir -p')) return { code: 0, stdout: '', stderr: '' };
       return answer(command);
@@ -917,13 +1143,23 @@ describe('agent-facing cli: each failure has its own exit code', () => {
       const source = { path: project, branch: 'main', commit: 'abc1234', dirty: true };
       const jobApi = (async (input: string | URL | Request) => {
         const state = String(input).endsWith('/cancel') ? 'cancelled' : 'succeeded';
-        return new Response(JSON.stringify({ job: { id: 'job_7', state, exitCode: null, error: null, source } }), { status: 200 });
+        return new Response(JSON.stringify({ job: { id: 'job_7', state, exitCode: null, error: null, source } }), {
+          status: 200,
+        });
       }) as typeof fetch;
-      const cancelled = await exitAndSummary(['cancel', 'job_7'], io(home, project, quietRemote, stdout, [], jobApi), stdout);
+      const cancelled = await exitAndSummary(
+        ['cancel', 'job_7'],
+        io(home, project, quietRemote, stdout, [], jobApi),
+        stdout,
+      );
       expect(cancelled.code).toBe(13);
       expect(cancelled.summary.state).toBe('cancelled');
 
-      const status = await exitAndSummary(['status', 'job_7'], io(home, project, quietRemote, stdout, [], jobApi), stdout);
+      const status = await exitAndSummary(
+        ['status', 'job_7'],
+        io(home, project, quietRemote, stdout, [], jobApi),
+        stdout,
+      );
       expect(status.code).toBe(0);
       expect(status.summary.source).toEqual(source);
 
@@ -934,7 +1170,9 @@ describe('agent-facing cli: each failure has its own exit code', () => {
         return api(input, init);
       }) as typeof fetch;
       const verify = ['verify', 'unit', '--priority', '5'];
-      expect((await exitAndSummary(verify, io(home, project, quietRemote, stdout, [], recording), stdout)).code).toBe(0);
+      expect((await exitAndSummary(verify, io(home, project, quietRemote, stdout, [], recording), stdout)).code).toBe(
+        0,
+      );
       expect(jobs).toEqual([expect.objectContaining({ priority: 5 })]);
     } finally {
       await rm(home, { recursive: true, force: true });
@@ -948,10 +1186,17 @@ describe('agent-facing cli: each failure has its own exit code', () => {
     try {
       await loggedIn(home);
       const api = (async (input: string | URL | Request) => {
-        if (String(input).endsWith('/events')) return new Response('{"error":{"code":"AUTH","message":"bad token"}}', { status: 401 });
-        return new Response(JSON.stringify({ job: { id: 'job_7', state: 'succeeded', exitCode: 0, error: null } }), { status: 200 });
+        if (String(input).endsWith('/events'))
+          return new Response('{"error":{"code":"AUTH","message":"bad token"}}', { status: 401 });
+        return new Response(JSON.stringify({ job: { id: 'job_7', state: 'succeeded', exitCode: 0, error: null } }), {
+          status: 200,
+        });
       }) as typeof fetch;
-      const { code, summary } = await exitAndSummary(['logs', 'job_7', '--follow'], io(home, home, quietRemote, stdout, [], api), stdout);
+      const { code, summary } = await exitAndSummary(
+        ['logs', 'job_7', '--follow'],
+        io(home, home, quietRemote, stdout, [], api),
+        stdout,
+      );
       expect(code).toBe(20);
       expect(summary.error).toBe('bad token');
     } finally {
@@ -965,22 +1210,31 @@ describe('agent-facing cli: each failure has its own exit code', () => {
     const stdout: string[] = [];
     try {
       await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
-      expect((await exitAndSummary(['start', '--direct'], io(home, project, quietRemote, stdout, []), stdout)).code).toBe(2);
+      expect(
+        (await exitAndSummary(['start', '--direct'], io(home, project, quietRemote, stdout, []), stdout)).code,
+      ).toBe(2);
 
       const host = ['--direct', '--ssh-host', 'dev@10.0.0.5'];
       const timedOut = directRemote(() => ({ code: null, stdout: '', stderr: '', timedOut: true }));
-      const timeout = await exitAndSummary(['verify', 'unit', ...host], io(home, project, timedOut, stdout, []), stdout);
+      const timeout = await exitAndSummary(
+        ['verify', 'unit', ...host],
+        io(home, project, timedOut, stdout, []),
+        stdout,
+      );
       expect(timeout.code).toBe(12);
       expect(timeout.summary.state).toBe('timed_out');
 
       const unreachable: RemoteRunner = {
         async run(file, args) {
-          if (file === 'ssh') return { code: 255, stdout: '', stderr: 'ssh: connect to host 10.0.0.5: No route to host' };
+          if (file === 'ssh')
+            return { code: 255, stdout: '', stderr: 'ssh: connect to host 10.0.0.5: No route to host' };
           return quietRemote.run(file, args);
         },
       };
       await rm(path.join(project, '.testbox'), { recursive: true, force: true });
-      expect((await exitAndSummary(['verify', 'unit', ...host], io(home, project, unreachable, stdout, []), stdout)).code).toBe(11);
+      expect(
+        (await exitAndSummary(['verify', 'unit', ...host], io(home, project, unreachable, stdout, []), stdout)).code,
+      ).toBe(11);
     } finally {
       await rm(home, { recursive: true, force: true });
       await rm(project, { recursive: true, force: true });
@@ -996,7 +1250,9 @@ describe('agent-facing cli: each failure has its own exit code', () => {
       await loggedIn(home);
       await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
       const verify = ['verify', 'unit', '--timeout', '0'];
-      expect((await exitAndSummary(verify, io(home, project, quietRemote, stdout, [], fakeApi(seen)), stdout)).code).toBe(2);
+      expect(
+        (await exitAndSummary(verify, io(home, project, quietRemote, stdout, [], fakeApi(seen)), stdout)).code,
+      ).toBe(2);
       expect(seen).toEqual([]);
 
       const down = (async () => {
@@ -1022,7 +1278,9 @@ describe('agent-facing cli: each failure has its own exit code', () => {
         if (String(input).endsWith('/healthz')) return new Response('{"ok":true}', { status: 200 });
         return new Response('{"error":{"code":"AUTH","message":"invalid token"}}', { status: 401 });
       }) as typeof fetch;
-      expect((await exitAndSummary(['doctor'], io(home, home, quietRemote, stdout, [], rejected), stdout)).code).toBe(20);
+      expect((await exitAndSummary(['doctor'], io(home, home, quietRemote, stdout, [], rejected), stdout)).code).toBe(
+        20,
+      );
 
       const calls: string[] = [];
       const remote: RemoteRunner = {

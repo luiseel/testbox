@@ -18,7 +18,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         typeof body === 'string'
           ? body
           : Array.isArray((body as { message?: unknown }).message)
-            ? ((body as { message: string[] }).message).join(', ')
+            ? (body as { message: string[] }).message.join(', ')
             : String((body as { message?: unknown }).message ?? exception.message);
       const code = status === 401 ? 'AUTH' : status === 403 ? 'FORBIDDEN' : 'BAD_REQUEST';
       res.status(status).json({ error: { code, message } });

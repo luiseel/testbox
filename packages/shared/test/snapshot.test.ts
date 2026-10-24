@@ -63,7 +63,9 @@ describe('snapshots', () => {
       const root = path.join(dataDir, snap.relPath);
       expect((await readdir(root)).sort()).toEqual(['api', 'interface']);
       // The job runs in <root>/interface, so ../api is the linked checkout.
-      expect(await readFile(path.join(root, 'interface', '..', 'api', 'client', 'Package.swift'), 'utf8')).toBe('pkg\n');
+      expect(await readFile(path.join(root, 'interface', '..', 'api', 'client', 'Package.swift'), 'utf8')).toBe(
+        'pkg\n',
+      );
       expect(await readFile(path.join(root, 'interface', 'ios', 'App.swift'), 'utf8')).toBe('app\n');
       await expect(readFile(path.join(root, 'interface', 'skip-main.txt'))).rejects.toThrow();
       await expect(readFile(path.join(root, 'api', 'skip-api.txt'))).rejects.toThrow();
@@ -83,7 +85,13 @@ describe('snapshots', () => {
     await mkdir(path.join(dataDir, apiRel), { recursive: true });
     await writeFile(path.join(dataDir, mainRel, 'a.txt'), 'a\n');
     try {
-      const plain = await createSnapshot({ dataDir, stagingRel: mainRel, snapshotId: 'snap_cccccccccccccccccccccccc', ignore: [], retentionMs: 1000 });
+      const plain = await createSnapshot({
+        dataDir,
+        stagingRel: mainRel,
+        snapshotId: 'snap_cccccccccccccccccccccccc',
+        ignore: [],
+        retentionMs: 1000,
+      });
       expect(plain.workDir).toBeUndefined();
       expect(await readFile(path.join(dataDir, plain.relPath, 'a.txt'), 'utf8')).toBe('a\n');
 
@@ -115,14 +123,16 @@ describe('snapshots', () => {
       release();
       await linked;
       expect(done).toBe(true);
-      await expect(createSnapshot({
-        dataDir,
-        stagingRel: mainRel,
-        snapshotId: 'snap_eeeeeeeeeeeeeeeeeeeeeeee',
-        ignore: [],
-        retentionMs: 1000,
-        links: [{ name: 'api', stagingRel: apiRel, ignore: [] }],
-      })).rejects.toThrow('needs a work dir');
+      await expect(
+        createSnapshot({
+          dataDir,
+          stagingRel: mainRel,
+          snapshotId: 'snap_eeeeeeeeeeeeeeeeeeeeeeee',
+          ignore: [],
+          retentionMs: 1000,
+          links: [{ name: 'api', stagingRel: apiRel, ignore: [] }],
+        }),
+      ).rejects.toThrow('needs a work dir');
     } finally {
       await rm(dataDir, { recursive: true, force: true });
     }
@@ -159,10 +169,21 @@ describe('snapshots', () => {
   it('rejects link names that differ only in case from the work dir or each other', async () => {
     const dataDir = await mkdtemp(path.join(os.tmpdir(), 'tb-snap-'));
     try {
-      for (const rel of ['workspaces/u/app/ws1', 'workspaces/u/App/ws2']) await mkdir(path.join(dataDir, rel), { recursive: true });
+      for (const rel of ['workspaces/u/app/ws1', 'workspaces/u/App/ws2'])
+        await mkdir(path.join(dataDir, rel), { recursive: true });
       const make = (links: { name: string; stagingRel: string; ignore: string[] }[]) =>
-        createSnapshot({ dataDir, stagingRel: 'workspaces/u/app/ws1', snapshotId: 'snap_case', ignore: [], retentionMs: 1000, workDir: 'app', links });
-      await expect(make([{ name: 'App', stagingRel: 'workspaces/u/App/ws2', ignore: [] }])).rejects.toThrow('link name App is used twice');
+        createSnapshot({
+          dataDir,
+          stagingRel: 'workspaces/u/app/ws1',
+          snapshotId: 'snap_case',
+          ignore: [],
+          retentionMs: 1000,
+          workDir: 'app',
+          links,
+        });
+      await expect(make([{ name: 'App', stagingRel: 'workspaces/u/App/ws2', ignore: [] }])).rejects.toThrow(
+        'link name App is used twice',
+      );
       await expect(
         make([
           { name: 'kit', stagingRel: 'workspaces/u/App/ws2', ignore: [] },
@@ -173,7 +194,6 @@ describe('snapshots', () => {
       await rm(dataDir, { recursive: true, force: true });
     }
   });
-
 });
 
 describe('retention', () => {
@@ -276,7 +296,9 @@ describe('dependency cache', () => {
     });
     expect(changed.refreshed).toBe(true);
     expect(installs).toBe(2);
-    expect(await readFile(path.join(cache, 'module-trees', first.digest, 'node_modules', 'marker.txt'), 'utf8')).toContain('install-1');
+    expect(
+      await readFile(path.join(cache, 'module-trees', first.digest, 'node_modules', 'marker.txt'), 'utf8'),
+    ).toContain('install-1');
     await rm(root, { recursive: true, force: true });
   });
 
@@ -313,10 +335,13 @@ describe('dependency cache', () => {
 });
 
 function buildFp(lock: string) {
-  return buildFingerprint({ 'pnpm-lock.yaml': lock }, {
-    nodeVersion: 'v22.0.0',
-    arch: 'arm64',
-    platform: 'darwin',
-    xcodeVersion: 'Xcode 16.0',
-  });
+  return buildFingerprint(
+    { 'pnpm-lock.yaml': lock },
+    {
+      nodeVersion: 'v22.0.0',
+      arch: 'arm64',
+      platform: 'darwin',
+      xcodeVersion: 'Xcode 16.0',
+    },
+  );
 }

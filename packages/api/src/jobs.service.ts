@@ -56,7 +56,12 @@ export class JobsService {
       createdAt: Date.now(),
     };
     await this.store.createWorkspace(workspace);
-    await this.store.audit({ at: workspace.createdAt, actorId: ownerId, action: 'workspace.create', subject: workspace.id });
+    await this.store.audit({
+      at: workspace.createdAt,
+      actorId: ownerId,
+      action: 'workspace.create',
+      subject: workspace.id,
+    });
     return workspace;
   }
 
@@ -126,7 +131,8 @@ export class JobsService {
       return this.store.withLock(`idem:${owner.id}:${input.idempotencyKey}`, async () => {
         const existing = await this.store.getIdempotency(owner.id, input.idempotencyKey!);
         if (existing) {
-          if (existing.hash !== requestHash) throw new AppError('CONFLICT', 'idempotency key reused with a different request', 409);
+          if (existing.hash !== requestHash)
+            throw new AppError('CONFLICT', 'idempotency key reused with a different request', 409);
           const job = await this.store.getJob(existing.jobId);
           if (!job) throw new AppError('NOT_FOUND', 'job not found', 404);
           return { job, superseded: [] };
@@ -145,7 +151,11 @@ export class JobsService {
     return job;
   }
 
-  async readLogs(id: string, ownerId: string, offset: number): Promise<{ lines: LogLine[]; state: JobRecord['state'] }> {
+  async readLogs(
+    id: string,
+    ownerId: string,
+    offset: number,
+  ): Promise<{ lines: LogLine[]; state: JobRecord['state'] }> {
     const job = await this.getJob(id, ownerId);
     const lines = await this.store.readLogs(id, offset);
     return { lines, state: job.state };
@@ -178,17 +188,12 @@ export class JobsService {
     const now = Date.now();
     const workers = await this.store.listWorkers();
     return workers.filter(
-      (worker) =>
-        now - worker.lastSeen <= this.options.heartbeatTtlMs &&
-        labelsSatisfy(worker.labels, requires),
+      (worker) => now - worker.lastSeen <= this.options.heartbeatTtlMs && labelsSatisfy(worker.labels, requires),
     );
   }
 
   /** Where Mutagen should sync. Prefers the workspace's warm worker. */
-  async selectWorker(input: {
-    requires?: string[];
-    workspaceId?: string | null;
-  }): Promise<WorkerRecord> {
+  async selectWorker(input: { requires?: string[]; workspaceId?: string | null }): Promise<WorkerRecord> {
     const requires = input.requires ?? [];
     const workers = await this.store.listWorkers();
     const impossible = explainUnsatisfiable(requires, workers);
@@ -216,11 +221,7 @@ export class JobsService {
     const target = workers.find((worker) => worker.id === targetWorkerId);
     if (!target || !labelsSatisfy(target.labels, requires)) {
       const need = requires.length > 0 ? requires.join(', ') : '(any worker)';
-      throw new AppError(
-        'NO_WORKER',
-        `worker ${targetWorkerId} cannot satisfy required labels: ${need}`,
-        503,
-      );
+      throw new AppError('NO_WORKER', `worker ${targetWorkerId} cannot satisfy required labels: ${need}`, 503);
     }
   }
 

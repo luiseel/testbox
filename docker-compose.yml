@@ -18,7 +18,11 @@ services:
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ['CMD-SHELL', '[ -z "$$TESTBOX_REDIS_PASSWORD" ] || export REDISCLI_AUTH="$$TESTBOX_REDIS_PASSWORD"; redis-cli ping | grep -q PONG']
+      test:
+        [
+          'CMD-SHELL',
+          '[ -z "$$TESTBOX_REDIS_PASSWORD" ] || export REDISCLI_AUTH="$$TESTBOX_REDIS_PASSWORD"; redis-cli ping | grep -q PONG',
+        ]
       interval: 5s
       timeout: 3s
       retries: 10

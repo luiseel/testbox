@@ -26,7 +26,8 @@ export function parseLinkFlags(values: readonly string[] | undefined, cwd: strin
     const name = at > 0 ? value.slice(0, at) : '';
     const dir = at > 0 ? value.slice(at + 1) : '';
     if (!SAFE_SEGMENT.test(name) || !dir) throw new LinkError(`invalid --link ${value}: pass --link <name>=<path>`);
-    if ([...overrides.keys()].some((other) => other.toLowerCase() === name.toLowerCase())) throw new LinkError(`--link ${name} is given twice`);
+    if ([...overrides.keys()].some((other) => other.toLowerCase() === name.toLowerCase()))
+      throw new LinkError(`--link ${name} is given twice`);
     overrides.set(name, path.resolve(cwd, dir));
   }
   return overrides;
@@ -45,7 +46,12 @@ async function statOrNull(target: string): Promise<Stats | null> {
  * The places to look for the checkout of link `name`, in order: the `--link` path; for a
  * checkout folder `<project>_<suffix>`, the sibling `<name>_<suffix>`; the sibling `<name>`.
  */
-export function linkCandidates(configDir: string, project: string, name: string, overrides: Map<string, string>): string[] {
+export function linkCandidates(
+  configDir: string,
+  project: string,
+  name: string,
+  overrides: Map<string, string>,
+): string[] {
   const override = overrides.get(name);
   if (override) return [override];
   const parent = path.dirname(configDir);
@@ -97,7 +103,10 @@ export async function samePlace(a: string, b: string): Promise<boolean> {
 }
 
 /** The link in `others` whose checkout is the one of `link` (also through a symlink), or null. */
-export async function sameCheckoutAs(link: LinkedCheckout, others: readonly LinkedCheckout[]): Promise<LinkedCheckout | null> {
+export async function sameCheckoutAs(
+  link: LinkedCheckout,
+  others: readonly LinkedCheckout[],
+): Promise<LinkedCheckout | null> {
   for (const other of others) {
     if (await samePlace(link.dir, other.dir)) return other;
   }

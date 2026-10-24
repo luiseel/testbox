@@ -1,7 +1,15 @@
 import { Body, Controller, Delete, Get, Headers, Inject, Param, Post, Query, Req, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { z } from 'zod';
-import { AppError, isTerminal, JOB_SOURCE_MAX_LENGTH, JOB_SOURCE_MAX_LINKS, JobStore, SAFE_SEGMENT, type JobRecord } from '@testbox/shared';
+import {
+  AppError,
+  isTerminal,
+  JOB_SOURCE_MAX_LENGTH,
+  JOB_SOURCE_MAX_LINKS,
+  JobStore,
+  SAFE_SEGMENT,
+  type JobRecord,
+} from '@testbox/shared';
 import { listArtifactFiles, openArtifact, readRequestBody, saveArtifact } from './artifacts';
 import { AuthService } from './auth.service';
 import { AuthedRequest, Public, Roles } from './auth.guard';
@@ -84,7 +92,9 @@ export class UsersController {
   /** Admin lookup by name, so `testbox admin add-user` can issue a new token to an existing user. */
   @Roles('admin')
   @Get()
-  async find(@Query('name') name: string | undefined): Promise<{ users: { id: string; name: string; role: string }[] }> {
+  async find(
+    @Query('name') name: string | undefined,
+  ): Promise<{ users: { id: string; name: string; role: string }[] }> {
     const input = parse(z.object({ name: z.string().min(1) }), { name });
     const user = await this.auth.findUserByName(input.name);
     return { users: user ? [{ id: user.id, name: user.name, role: user.role }] : [] };
@@ -112,10 +122,7 @@ export class WorkspacesController {
 
   @Post()
   async create(@Req() req: AuthedRequest, @Body() body: unknown) {
-    const input = parse(
-      z.object({ project: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/) }),
-      body,
-    );
+    const input = parse(z.object({ project: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/) }), body);
     return this.jobs.createWorkspace(req.principal.id, input.project);
   }
 
@@ -159,11 +166,7 @@ export class JobsController {
   ) {}
 
   @Post()
-  async create(
-    @Req() req: AuthedRequest,
-    @Body() body: unknown,
-    @Headers('idempotency-key') idempotencyKey?: string,
-  ) {
+  async create(@Req() req: AuthedRequest, @Body() body: unknown, @Headers('idempotency-key') idempotencyKey?: string) {
     const input = parse(
       z.object({
         workspaceId: z.string().min(1),
@@ -174,7 +177,12 @@ export class JobsController {
         requires: z.array(z.string()).optional(),
         targetWorkerId: z.string().min(1).max(200).nullable().optional(),
         priority: z.number().int().min(0).max(999).optional(),
-        timeoutMs: z.number().int().min(1000).max(24 * 60 * 60 * 1000).optional(),
+        timeoutMs: z
+          .number()
+          .int()
+          .min(1000)
+          .max(24 * 60 * 60 * 1000)
+          .optional(),
         idempotencyKey: z.string().min(8).max(200).optional(),
         source: z
           .object({
@@ -212,7 +220,12 @@ export class JobsController {
   }
 
   @Get(':id/events')
-  async events(@Req() req: AuthedRequest, @Param('id') id: string, @Res() res: Response, @Query('offset') offset?: string) {
+  async events(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Res() res: Response,
+    @Query('offset') offset?: string,
+  ) {
     const job = await this.jobs.getJob(id, req.principal.id);
     res.status(200);
     res.setHeader('Content-Type', 'text/event-stream');
@@ -258,11 +271,14 @@ export class JobsController {
     }
     write('state', { state: job.state, exitCode: job.exitCode, error: job.error });
     const poll = setInterval(() => {
-      void this.store.getJob(id).then((current) => {
-        if (!current) return;
-        write('state', { state: current.state, exitCode: current.exitCode, error: current.error });
-        if (isTerminal(current.state)) return finish(current.state, current.exitCode, current.error);
-      }).catch(() => undefined);
+      void this.store
+        .getJob(id)
+        .then((current) => {
+          if (!current) return;
+          write('state', { state: current.state, exitCode: current.exitCode, error: current.error });
+          if (isTerminal(current.state)) return finish(current.state, current.exitCode, current.error);
+        })
+        .catch(() => undefined);
     }, 500);
     const ping = setInterval(() => {
       if (!closed) res.write(': ping\n\n');

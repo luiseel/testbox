@@ -142,7 +142,9 @@ export class HttpApi {
     return this.request('POST', `/v1/jobs/${id}/cancel`);
   }
 
-  logs(id: string): Promise<{ lines: { stream: 'stdout' | 'stderr'; line: string; offset: number }[]; state: JobState }> {
+  logs(
+    id: string,
+  ): Promise<{ lines: { stream: 'stdout' | 'stderr'; line: string; offset: number }[]; state: JobState }> {
     return this.request('GET', `/v1/jobs/${id}/logs`);
   }
 
@@ -164,10 +166,9 @@ export class HttpApi {
   }
 
   async listWorkers(): Promise<{ id: string; healthy: boolean; labels: string[]; sshHost?: string | null }[]> {
-    const body = await this.request<{ workers: { id: string; healthy: boolean; labels: string[]; sshHost?: string | null }[] }>(
-      'GET',
-      '/v1/workers',
-    );
+    const body = await this.request<{
+      workers: { id: string; healthy: boolean; labels: string[]; sshHost?: string | null }[];
+    }>('GET', '/v1/workers');
     return body.workers;
   }
 
@@ -182,16 +183,16 @@ export class HttpApi {
       { headers: { authorization: `Bearer ${this.token}` } },
     );
     if (!response.ok) {
-      throw new CliApiError('artifact download failed', response.status === 401 ? 'AUTH' : 'BAD_REQUEST', response.status);
+      throw new CliApiError(
+        'artifact download failed',
+        response.status === 401 ? 'AUTH' : 'BAD_REQUEST',
+        response.status,
+      );
     }
     return new Uint8Array(await response.arrayBuffer());
   }
 
-  async stream(
-    id: string,
-    onEvent: (event: string, data: string) => void,
-    signal: AbortSignal,
-  ): Promise<void> {
+  async stream(id: string, onEvent: (event: string, data: string) => void, signal: AbortSignal): Promise<void> {
     const response = await this.fetchImpl(this.url(`/v1/jobs/${id}/events`), {
       headers: { authorization: `Bearer ${this.token}`, accept: 'text/event-stream' },
       signal,

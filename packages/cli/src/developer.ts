@@ -61,9 +61,14 @@ export class DeveloperApp {
     }
     if (process.platform === 'darwin' && !(await this.hasFlock())) {
       say('installing flock');
-      const brew = await this.io.remote.run('brew', ['install', 'flock'], { onStderr: (text) => this.io.stderr.write(text) });
+      const brew = await this.io.remote.run('brew', ['install', 'flock'], {
+        onStderr: (text) => this.io.stderr.write(text),
+      });
       if (brew.code !== 0) {
-        this.out().failure('could not install flock with Homebrew. Run brew install flock, then run testbox setup again.', ExitCode.JobFailed);
+        this.out().failure(
+          'could not install flock with Homebrew. Run brew install flock, then run testbox setup again.',
+          ExitCode.JobFailed,
+        );
         return ExitCode.JobFailed;
       }
     }
@@ -105,7 +110,11 @@ export class DeveloperApp {
       return exit;
     };
     if (!user?.token || !user.apiUrl) {
-      add({ ok: false, label: 'logged in', fix: 'ask an admin for a setup command (testbox admin add-user <name>), then run it' });
+      add({
+        ok: false,
+        label: 'logged in',
+        fix: 'ask an admin for a setup command (testbox admin add-user <name>), then run it',
+      });
       return stop(ExitCode.Auth);
     }
     const api = new HttpApi(user.apiUrl, user.token, this.io.fetchImpl);
@@ -129,7 +138,11 @@ export class DeveloperApp {
       throw err;
     }
     const mutagen = await this.hasMutagen();
-    add(mutagen ? { ok: true, label: 'Mutagen' } : { ok: false, label: 'Mutagen', fix: 'brew install mutagen-io/mutagen/mutagen' });
+    add(
+      mutagen
+        ? { ok: true, label: 'Mutagen' }
+        : { ok: false, label: 'Mutagen', fix: 'brew install mutagen-io/mutagen/mutagen' },
+    );
     if (mutagen) {
       for (const check of await this.checkSyncs()) add(check);
     }
@@ -137,7 +150,11 @@ export class DeveloperApp {
     add(
       (await this.hasFlock())
         ? { ok: true, label: 'flock' }
-        : { ok: false, label: 'flock', fix: process.platform === 'darwin' ? 'brew install flock' : 'install util-linux (it has flock)' },
+        : {
+            ok: false,
+            label: 'flock',
+            fix: process.platform === 'darwin' ? 'brew install flock' : 'install util-linux (it has flock)',
+          },
     );
 
     const workers = (await api.listWorkers()) as Worker[];
@@ -170,7 +187,10 @@ export class DeveloperApp {
     try {
       report = await classifySessions(await this.mutagen().list(), loadRootState);
     } catch (err) {
-      this.out().failure(`cannot list Mutagen syncs: ${err instanceof Error ? err.message.trim() : String(err)}`, ExitCode.SyncError);
+      this.out().failure(
+        `cannot list Mutagen syncs: ${err instanceof Error ? err.message.trim() : String(err)}`,
+        ExitCode.SyncError,
+      );
       return ExitCode.SyncError;
     }
     const stale = report.sessions.filter((entry) => entry.kind !== 'live');
@@ -195,11 +215,14 @@ export class DeveloperApp {
       } else if (error) {
         this.io.stderr.write(`could not terminate ${session.name}: ${error}\n`);
       } else {
-        this.io.stdout.write(`${dryRun ? 'would terminate' : 'terminated'} ${session.name} (${reason}: ${session.alphaPath})\n`);
+        this.io.stdout.write(
+          `${dryRun ? 'would terminate' : 'terminated'} ${session.name} (${reason}: ${session.alphaPath})\n`,
+        );
       }
     }
     const exit = failed > 0 ? ExitCode.SyncError : ExitCode.Pass;
-    if (!this.json) this.io.stdout.write(`${dryRun ? `${count} stale syncs to terminate` : `${count} stale syncs terminated`}\n`);
+    if (!this.json)
+      this.io.stdout.write(`${dryRun ? `${count} stale syncs to terminate` : `${count} stale syncs terminated`}\n`);
     this.out().summary({ ok: failed === 0, exitCode: null, exit, count, failed, dryRun });
     return exit;
   }
@@ -220,7 +243,13 @@ export class DeveloperApp {
       this.io.stderr.write(`wrote testbox.yml with ${detected.profiles.map((profile) => profile.name).join(', ')}\n`);
     }
     this.io.stderr.write('next: testbox verify <profile>\n');
-    this.out().summary({ ok: true, exitCode: 0, exit: 0, file, profiles: detected.profiles.map((profile) => profile.name) });
+    this.out().summary({
+      ok: true,
+      exitCode: 0,
+      exit: 0,
+      file,
+      profiles: detected.profiles.map((profile) => profile.name),
+    });
     return ExitCode.Pass;
   }
 
@@ -229,7 +258,10 @@ export class DeveloperApp {
     const host = worker.sshHost ?? '';
     checks.push(
       worker.healthy
-        ? { ok: true, label: `${worker.id} is up (${worker.labels.filter((label) => !label.startsWith('worker:')).join(', ')})` }
+        ? {
+            ok: true,
+            label: `${worker.id} is up (${worker.labels.filter((label) => !label.startsWith('worker:')).join(', ')})`,
+          }
         : {
             ok: false,
             label: `${worker.id} sends no heartbeat`,
@@ -299,7 +331,13 @@ export class DeveloperApp {
    * One check per link of a profile: the CLI finds its checkout, the checkout has a testbox.yml, and it is
    * not the checkout of another link of the profile (verify rejects that too).
    */
-  private async checkLink(configDir: string, project: string, profile: string, link: string, found: LinkedCheckout[]): Promise<Check> {
+  private async checkLink(
+    configDir: string,
+    project: string,
+    profile: string,
+    link: string,
+    found: LinkedCheckout[],
+  ): Promise<Check> {
     try {
       const checkout = await resolveLink(configDir, project, link, new Map());
       const other = await sameCheckoutAs(checkout, found);
@@ -329,7 +367,13 @@ export class DeveloperApp {
     try {
       report = await classifySessions(await this.mutagen().list(), loadRootState);
     } catch (err) {
-      return [{ ok: false, label: 'list Mutagen syncs', fix: `mutagen sync list failed: ${err instanceof Error ? err.message.trim() : String(err)}` }];
+      return [
+        {
+          ok: false,
+          label: 'list Mutagen syncs',
+          fix: `mutagen sync list failed: ${err instanceof Error ? err.message.trim() : String(err)}`,
+        },
+      ];
     }
     const checks: Check[] = [];
     for (const { session, kind } of report.sessions) {
@@ -428,7 +472,9 @@ async function subdirs(root: string, rel: string): Promise<string[]> {
 
 /** Find test commands in the repo root and two levels below it (e.g. client/swift-client). */
 export async function detectProfiles(root: string): Promise<{ profiles: DetectedProfile[]; ignore: string[] }> {
-  const mise = (await Promise.all(['mise.toml', '.mise.toml', '.tool-versions'].map((name) => exists(path.join(root, name))))).some(Boolean);
+  const mise = (
+    await Promise.all(['mise.toml', '.mise.toml', '.tool-versions'].map((name) => exists(path.join(root, name))))
+  ).some(Boolean);
   const toolchain = mise ? ['mise'] : [];
   const level1 = await subdirs(root, '');
   const dirs = ['', ...level1];
@@ -441,9 +487,15 @@ export async function detectProfiles(root: string): Promise<{ profiles: Detected
     const has = (name: string) => exists(path.join(abs, name));
     const prefix = dir ? `cd ${dir} && ` : '';
     if (await has('package.json')) {
-      const pkg = JSON.parse(await readFile(path.join(abs, 'package.json'), 'utf8')) as { scripts?: Record<string, string> };
+      const pkg = JSON.parse(await readFile(path.join(abs, 'package.json'), 'utf8')) as {
+        scripts?: Record<string, string>;
+      };
       if (pkg.scripts?.test) {
-        const runner = (await has('pnpm-lock.yaml')) ? 'pnpm test' : (await has('yarn.lock')) ? 'yarn test' : 'npm test';
+        const runner = (await has('pnpm-lock.yaml'))
+          ? 'pnpm test'
+          : (await has('yarn.lock'))
+            ? 'yarn test'
+            : 'npm test';
         found.push({ kind: 'test', command: `${prefix}${runner}`, requires: toolchain });
         ignore.add(dir ? `${dir}/node_modules` : 'node_modules').add(dir ? `${dir}/dist` : 'dist');
       }
@@ -487,7 +539,12 @@ export async function detectProfiles(root: string): Promise<{ profiles: Detected
       const base = dir ? path.basename(dir) : '';
       let name = base ? (found.length === 1 ? base : `${base}-${entry.kind}`) : entry.kind;
       if (profiles.some((profile) => profile.name === name)) name = `${dir.replace(/\//g, '-')}-${entry.kind}`;
-      profiles.push({ name: name.replace(/[^A-Za-z0-9_-]/g, '-'), command: entry.command, requires: entry.requires, note: entry.note });
+      profiles.push({
+        name: name.replace(/[^A-Za-z0-9_-]/g, '-'),
+        command: entry.command,
+        requires: entry.requires,
+        note: entry.note,
+      });
     }
   }
   return { profiles, ignore: [...ignore] };

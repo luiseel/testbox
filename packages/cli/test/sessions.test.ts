@@ -39,7 +39,9 @@ function state(dir: string, sessionName: string, workerSessions: Record<string, 
     remoteRoot: '~/testbox',
     direct: false,
     configDir: dir,
-    sessions: Object.fromEntries(Object.entries(workerSessions).map(([id, name]) => [id, { sessionName: name, sshHost: 'me@10.0.0.7' }])),
+    sessions: Object.fromEntries(
+      Object.entries(workerSessions).map(([id, name]) => [id, { sessionName: name, sshHost: 'me@10.0.0.7' }]),
+    ),
   };
 }
 
@@ -92,14 +94,20 @@ describe('parseMutagenSessions', () => {
   });
 
   it('writes an SSH destination as user@host:path', () => {
-    expect(parseMutagenSessions(JSON.stringify([entry('testbox-a', '/src/a', '~/testbox/w')]))[0]?.betaUrl).toBe('me@10.0.0.7:~/testbox/w');
+    expect(parseMutagenSessions(JSON.stringify([entry('testbox-a', '/src/a', '~/testbox/w')]))[0]?.betaUrl).toBe(
+      'me@10.0.0.7:~/testbox/w',
+    );
   });
 });
 
 describe('classifySessions', () => {
   it('finds deleted roots, unowned syncs, live syncs, and live syncs that share a destination', async () => {
     // A state file that cannot be read keeps its sync: prune must not kill a live one.
-    const session = (name: string, alpha: string, beta = 'me@w:~/testbox/workspaces/local/demo'): MutagenSessionInfo => ({
+    const session = (
+      name: string,
+      alpha: string,
+      beta = 'me@w:~/testbox/workspaces/local/demo',
+    ): MutagenSessionInfo => ({
       name,
       alphaPath: alpha,
       betaUrl: beta,
@@ -136,7 +144,11 @@ describe('classifySessions', () => {
       ['testbox-demo-locked', 'live'],
     ]);
     expect(report.conflicts).toEqual([
-      { betaUrl: 'me@w:~/testbox/workspaces/local/demo', roots: ['/a', '/b'], sessions: ['testbox-demo-a', 'testbox-demo-b'] },
+      {
+        betaUrl: 'me@w:~/testbox/workspaces/local/demo',
+        roots: ['/a', '/b'],
+        sessions: ['testbox-demo-a', 'testbox-demo-b'],
+      },
     ]);
   });
 });
@@ -209,10 +221,14 @@ describe('testbox prune and doctor', () => {
     try {
       expect(await runCli(['doctor'], { ...io(home, remote, out), fetchImpl })).toBe(1);
       const text = out.join('');
-      expect(text).toContain(`✗ sync testbox-demo-gone (root deleted: ${path.join(home, 'deleted')})\n    fix: testbox prune`);
+      expect(text).toContain(
+        `✗ sync testbox-demo-gone (root deleted: ${path.join(home, 'deleted')})\n    fix: testbox prune`,
+      );
       expect(text).toContain(`✗ sync testbox-demo-plain (no workspace owns it: ${path.join(home, 'plain')})`);
       expect(text).not.toContain('someone-else');
-      expect(text).toContain(`✗ syncs from ${live} and ${other} write to the same worker folder me@10.0.0.7:~/testbox/workspaces/local/demo`);
+      expect(text).toContain(
+        `✗ syncs from ${live} and ${other} write to the same worker folder me@10.0.0.7:~/testbox/workspaces/local/demo`,
+      );
       expect(text).toContain('fix: run testbox stop in the checkout you do not use');
       expect(text).not.toContain('no stale syncs');
     } finally {

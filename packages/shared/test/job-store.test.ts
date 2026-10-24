@@ -11,7 +11,9 @@ describe('job store', () => {
       await store.createJob(record);
       expect((await store.transition(record.id, ['queued'], 'assigned', { workerId: 'w' })).ok).toBe(true);
       expect((await store.transition(record.id, ['assigned'], 'running')).ok).toBe(true);
-      expect((await store.transition(record.id, ['running'], 'succeeded', { exitCode: 0, endedAt: Date.now() })).ok).toBe(true);
+      expect(
+        (await store.transition(record.id, ['running'], 'succeeded', { exitCode: 0, endedAt: Date.now() })).ok,
+      ).toBe(true);
       const again = await store.transition(record.id, ['succeeded', 'queued', 'running'], 'running');
       expect(again.ok).toBe(false);
       expect(again.reason).toBe('terminal');
@@ -194,7 +196,14 @@ describe('claimNextJob', () => {
     await store.createUser({ id: 'usr_test', name: `u_${store.prefix}`, role: 'user', createdAt: now });
     for (const patch of workers) {
       await store.upsertWorker({
-        id: 'w1', hostname: 'h', os: 'linux', arch: 'x64', labels: ['linux'], capacity: 1, lastSeen: now, sshHost: null,
+        id: 'w1',
+        hostname: 'h',
+        os: 'linux',
+        arch: 'x64',
+        labels: ['linux'],
+        capacity: 1,
+        lastSeen: now,
+        sshHost: null,
         ...patch,
       });
     }
@@ -343,7 +352,9 @@ function baseJob(prefix: string, patch: Partial<JobRecord> = {}): JobRecord {
 
 async function openStore(): Promise<{ store: JobStore; client: IORedis; close: () => Promise<void> }> {
   const prefix = `store_${Math.random().toString(16).slice(2)}`;
-  const client = new IORedis(process.env.TESTBOX_TEST_REDIS_URL ?? 'redis://127.0.0.1:6379', { maxRetriesPerRequest: null });
+  const client = new IORedis(process.env.TESTBOX_TEST_REDIS_URL ?? 'redis://127.0.0.1:6379', {
+    maxRetriesPerRequest: null,
+  });
   return {
     store: new JobStore(client, prefix),
     client,

@@ -32,7 +32,10 @@ export function cleanSourceField(value: string): string {
 }
 
 function formatRef(source: { branch?: string; commit?: string }): string {
-  return [source.branch, source.commit].filter((part): part is string => Boolean(part)).map(cleanSourceField).join('@');
+  return [source.branch, source.commit]
+    .filter((part): part is string => Boolean(part))
+    .map(cleanSourceField)
+    .join('@');
 }
 
 /**

@@ -26,12 +26,18 @@ describe('snapshot-cli', () => {
     });
     try {
       const code = await runSnapshotCli([
-        '--data-dir', dataDir,
-        '--staging-rel', mainRel,
-        '--snapshot-id', 'snap_ffffffffffffffffffffffff',
-        '--work-dir', 'interface',
-        '--link', `api=${apiRel}`,
-        '--link-ignore', 'api=*.env',
+        '--data-dir',
+        dataDir,
+        '--staging-rel',
+        mainRel,
+        '--snapshot-id',
+        'snap_ffffffffffffffffffffffff',
+        '--work-dir',
+        'interface',
+        '--link',
+        `api=${apiRel}`,
+        '--link-ignore',
+        'api=*.env',
       ]);
       expect(code).toBe(0);
       const result = JSON.parse(written.join('')) as { digest: string; relPath: string; workDir: string };
@@ -47,8 +53,17 @@ describe('snapshot-cli', () => {
   });
 
   it('rejects a --link without --work-dir and a --link-ignore without its --link', async () => {
-    const base = ['--data-dir', '/tmp/x', '--staging-rel', 'workspaces/u/p/ws', '--snapshot-id', 'snap_ffffffffffffffffffffffff'];
-    await expect(runSnapshotCli([...base, '--link', 'api=workspaces/u/api/ws'])).rejects.toThrow('--link needs --work-dir');
+    const base = [
+      '--data-dir',
+      '/tmp/x',
+      '--staging-rel',
+      'workspaces/u/p/ws',
+      '--snapshot-id',
+      'snap_ffffffffffffffffffffffff',
+    ];
+    await expect(runSnapshotCli([...base, '--link', 'api=workspaces/u/api/ws'])).rejects.toThrow(
+      '--link needs --work-dir',
+    );
     await expect(runSnapshotCli([...base, '--link-ignore', 'api=*.env'])).rejects.toThrow('no --link api');
     await expect(runSnapshotCli([...base, '--link', 'api'])).rejects.toThrow('--link needs NAME=VALUE');
   });

@@ -358,18 +358,11 @@ export class JobStore {
     return { ok: true, reason: to };
   }
 
-  async renewLease(
-    id: string,
-    workerId: string,
-    leaseExpiresAt: number,
-  ): Promise<{ ok: boolean; state: string }> {
-    const result = (await this.redis.eval(
-      RENEW_LUA,
-      1,
-      this.jobKey(id),
-      workerId,
-      String(leaseExpiresAt),
-    )) as [string, string];
+  async renewLease(id: string, workerId: string, leaseExpiresAt: number): Promise<{ ok: boolean; state: string }> {
+    const result = (await this.redis.eval(RENEW_LUA, 1, this.jobKey(id), workerId, String(leaseExpiresAt))) as [
+      string,
+      string,
+    ];
     return { ok: result[0] === 'ok', state: result[1] };
   }
 
