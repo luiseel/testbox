@@ -124,7 +124,7 @@ export class AdminApp {
         const name = flags.user ?? defaultUserName();
         const token = await this.issueUserToken(name);
         await writeUserConfig(this.io.homeDir, {
-          ...(login ?? {}),
+          ...login,
           apiUrl,
           token,
           remoteRoot: login?.remoteRoot ?? '~/testbox',

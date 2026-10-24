@@ -691,7 +691,7 @@ describe('agent-facing cli: links', () => {
       const lines = jsonLines(stdout) as (Line & { links?: unknown })[];
       const source = lines.find((line) => line.type === 'source');
       expect(source?.links).toEqual([{ name: 'api', path: apiDir, dirty: false }]);
-      expect((seen.find((entry) => entry.call === 'POST /v1/jobs')?.body as { source: unknown }).source).toMatchObject({ links: [{ name: 'api', path: apiDir }] });
+      expect(seen.find((entry) => entry.call === 'POST /v1/jobs')?.body).toMatchObject({ source: { links: [{ name: 'api', path: apiDir }] } });
       expect(lines.at(-1)).toMatchObject({ type: 'summary', state: 'succeeded', exit: 0 });
     } finally {
       await rm(home, { recursive: true, force: true });

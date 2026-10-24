@@ -156,7 +156,7 @@ export class Daemon {
     this.renewals.clear();
     for (const abort of this.aborts.values()) abort.abort('shutdown');
     if (this.pumpPromise) await this.pumpPromise;
-    await Promise.allSettled([...this.running]);
+    await Promise.allSettled(this.running);
     if (this.sub) await this.sub.quit();
     this.sub = null;
     await this.redis.quit();

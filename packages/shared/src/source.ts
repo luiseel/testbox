@@ -23,9 +23,12 @@ export interface JobSource extends CheckoutSource {
   links?: JobSourceLink[];
 }
 
+// oxlint-disable-next-line no-control-regex -- control characters are the thing to remove
+const CONTROL_CHARACTERS = /[\x00-\x1f\x7f]+/g;
+
 /** Cut a source field to the accepted length and replace control characters, so the log line stays one line. */
 export function cleanSourceField(value: string): string {
-  return value.replace(/[\x00-\x1f\x7f]+/g, ' ').trim().slice(0, JOB_SOURCE_MAX_LENGTH);
+  return value.replace(CONTROL_CHARACTERS, ' ').trim().slice(0, JOB_SOURCE_MAX_LENGTH);
 }
 
 function formatRef(source: { branch?: string; commit?: string }): string {
