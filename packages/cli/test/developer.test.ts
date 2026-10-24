@@ -75,6 +75,43 @@ describe('testbox init', () => {
 });
 
 describe('testbox doctor', () => {
+  it('tells a stopped control plane from a network problem when the API does not answer', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-doc-'));
+    await writeUserConfig(home, { apiUrl: 'http://10.0.0.5:3000', token: 'tok', remoteRoot: '~/testbox' });
+    const failing = (code: string) =>
+      (async () => {
+        throw new TypeError('fetch failed', { cause: Object.assign(new Error(code), { code }) });
+      }) as typeof fetch;
+    const fixFor = async (fetchImpl: typeof fetch) => {
+      const out: string[] = [];
+      expect(await runCli(['doctor'], io(home, home, noRemote, fetchImpl, out))).toBe(11);
+      const text = out.join('');
+      expect(text).toContain('✗ API at http://10.0.0.5:3000');
+      return text;
+    };
+    try {
+      // Nothing listens on the port: the host is up, the containers are not.
+      const refused = await fixFor(failing('ECONNREFUSED'));
+      expect(refused).toContain('10.0.0.5:3000 is up, but the API is not running (ECONNREFUSED)');
+      expect(refused).toContain('cd ~/testbox/app && docker compose up -d');
+      expect(refused).toContain('run testbox admin upgrade once');
+      expect(refused).not.toContain('VPN');
+
+      // No answer at all: the network, or a stopped host. Say both.
+      const unreachable = await fixFor(failing('ETIMEDOUT'));
+      expect(unreachable).toContain('no answer from 10.0.0.5:3000 (ETIMEDOUT)');
+      expect(unreachable).toContain('Turn on your VPN');
+      expect(unreachable).toContain('cd ~/testbox/app && docker compose up -d');
+
+      // The API answers, but not with 200: for example Redis is down behind it.
+      const unhealthy = await fixFor((async () => new Response('', { status: 503 })) as typeof fetch);
+      expect(unhealthy).toContain('the API answers HTTP 503 but is not healthy');
+      expect(unhealthy).toContain('docker compose logs api && docker compose restart api');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   it('reports each problem with its fix', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'tb-doc-'));
     const out: string[] = [];

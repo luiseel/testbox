@@ -26,6 +26,18 @@ interface JobPayload {
   source?: JobSource | null;
 }
 
+/** The result of the health check. `refused`: the host answers, nothing listens. `unreachable`: no answer at all. */
+export type ApiHealth = { ok: true } | { ok: false; reason: 'refused' | 'unreachable' | 'unhealthy'; detail: string };
+
+/** The `code` of a fetch error, which Node keeps in `cause` (ECONNREFUSED, ETIMEDOUT, ...). */
+function errorCode(err: unknown): string | undefined {
+  for (let e: unknown = err; e instanceof Error; e = e.cause) {
+    const code = (e as { code?: unknown }).code;
+    if (typeof code === 'string') return code;
+  }
+  return undefined;
+}
+
 export class HttpApi {
   constructor(
     private readonly baseUrl: string,
@@ -90,12 +102,21 @@ export class HttpApi {
     return this.request('POST', `/v1/users/${encodeURIComponent(userId)}/tokens`);
   }
 
+  /** True when the API answers the health check. `admin` polls this while the control plane starts. */
   async healthy(): Promise<boolean> {
+    return (await this.health()).ok;
+  }
+
+  /** Why the API does not answer, so doctor can say what to do. Gives up after 10 seconds. */
+  async health(): Promise<ApiHealth> {
     try {
-      await this.request('GET', '/v1/healthz');
-      return true;
-    } catch {
-      return false;
+      await this.request('GET', '/v1/healthz', undefined, undefined, AbortSignal.timeout(10_000));
+      return { ok: true };
+    } catch (err) {
+      if (err instanceof CliApiError) return { ok: false, reason: 'unhealthy', detail: `HTTP ${err.status}` };
+      const code = errorCode(err);
+      if (code === 'ECONNREFUSED') return { ok: false, reason: 'refused', detail: code };
+      return { ok: false, reason: 'unreachable', detail: code ?? (err instanceof Error ? err.message : String(err)) };
     }
   }
 
