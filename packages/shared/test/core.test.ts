@@ -334,6 +334,7 @@ describe('exit codes', () => {
     [ExitCode.Timeout, '--timeout'],
     [ExitCode.Cancelled, 'cancelled'],
     [ExitCode.Auth, 'setup line'],
+    [ExitCode.ApiUnreachable, 'testbox doctor'],
   ])('exit %i has a hint that says what to do', (code, words) => {
     expect(hintForExitCode(code)).toContain(words);
   });

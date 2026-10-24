@@ -1,4 +1,4 @@
-import { exitCodeForApiError, type JobSource, type JobState } from '@testbox/shared';
+import { ExitCode, exitCodeForApiError, type JobSource, type JobState } from '@testbox/shared';
 
 export class CliApiError extends Error {
   constructor(
@@ -11,8 +11,18 @@ export class CliApiError extends Error {
   }
 }
 
+/** The API gave no answer: no route, nothing listens, or the request timed out. Not an HTTP error. */
+export class ApiUnreachableError extends Error {
+  constructor(apiUrl: string, cause: unknown) {
+    const why = errorCode(cause) ?? (cause instanceof Error ? cause.message : String(cause));
+    super(`cannot reach the API at ${new URL(apiUrl).origin}: ${why}`, { cause });
+    this.name = 'ApiUnreachableError';
+  }
+}
+
 export function exitCodeForCliError(err: unknown): number | null {
   if (err instanceof CliApiError) return exitCodeForApiError(err.code, err.status);
+  if (err instanceof ApiUnreachableError) return ExitCode.ApiUnreachable;
   return null;
 }
 
@@ -45,6 +55,19 @@ export class HttpApi {
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
+  /**
+   * fetch, with a network failure turned into ApiUnreachableError so the exit code is 21, not 1.
+   * An abort by the caller (Ctrl-C, detach) is not a network failure and passes through.
+   */
+  private async fetch(url: string, init: RequestInit): Promise<Response> {
+    try {
+      return await this.fetchImpl(url, init);
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') throw err;
+      throw new ApiUnreachableError(this.baseUrl, err);
+    }
+  }
+
   private url(path: string): string {
     return `${this.baseUrl.replace(/\/$/, '')}${path}`;
   }
@@ -56,7 +79,7 @@ export class HttpApi {
     headers?: Record<string, string>,
     signal?: AbortSignal,
   ): Promise<T> {
-    const response = await this.fetchImpl(this.url(path), {
+    const response = await this.fetch(this.url(path), {
       method,
       signal,
       headers: {
@@ -199,7 +222,7 @@ export class HttpApi {
   }
 
   async downloadArtifact(id: string, relPath: string): Promise<Uint8Array> {
-    const response = await this.fetchImpl(
+    const response = await this.fetch(
       this.url(`/v1/jobs/${id}/artifacts/content?path=${encodeURIComponent(relPath)}`),
       { headers: { authorization: `Bearer ${this.token}` } },
     );
@@ -214,7 +237,7 @@ export class HttpApi {
   }
 
   async stream(id: string, onEvent: (event: string, data: string) => void, signal: AbortSignal): Promise<void> {
-    const response = await this.fetchImpl(this.url(`/v1/jobs/${id}/events`), {
+    const response = await this.fetch(this.url(`/v1/jobs/${id}/events`), {
       headers: { authorization: `Bearer ${this.token}`, accept: 'text/event-stream' },
       signal,
     });

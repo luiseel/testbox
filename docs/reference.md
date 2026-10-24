@@ -47,6 +47,7 @@ Admin exit codes: 2 when the address is missing (pass `--address <LAN IP>`) or t
 | 12 | timeout, or the worker stopped during the job (its lease expired) |
 | 13 | cancelled |
 | 20 | auth (the API answers 401 or 403) |
+| 21 | the API does not answer: no route to it, nothing listens on the port, or the request timed out. The `error` names the API address and the reason (`ECONNREFUSED`, `ETIMEDOUT`, ...). `doctor` also exits 21 when its API check fails. |
 
 ## Output with --json
 

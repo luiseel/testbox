@@ -137,7 +137,7 @@ export class DeveloperApp {
     const health = await api.health();
     if (!health.ok) {
       add({ ok: false, label: `API at ${user.apiUrl}`, fix: apiDownFix(user.apiUrl, health) });
-      return stop(ExitCode.NoWorker);
+      return stop(ExitCode.ApiUnreachable);
     }
     add({ ok: true, label: `API at ${user.apiUrl}` });
     try {

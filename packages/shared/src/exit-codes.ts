@@ -9,6 +9,7 @@ export const ExitCode = {
   Timeout: 12,
   Cancelled: 13,
   Auth: 20,
+  ApiUnreachable: 21,
 } as const;
 
 export type ExitCodeValue = (typeof ExitCode)[keyof typeof ExitCode];
@@ -60,6 +61,8 @@ export function hintForExitCode(code: number): string | undefined {
       return 'cancelled: someone cancelled it, or a newer submit of the same profile replaced it';
     case ExitCode.Auth:
       return 'not logged in or bad token: ask an admin for a new testbox setup line';
+    case ExitCode.ApiUnreachable:
+      return 'cannot reach the API: run testbox doctor; its fix line says whether it is the VPN or the control plane';
     default:
       return undefined;
   }

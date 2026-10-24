@@ -84,7 +84,7 @@ describe('testbox doctor', () => {
       }) as typeof fetch;
     const fixFor = async (fetchImpl: typeof fetch) => {
       const out: string[] = [];
-      expect(await runCli(['doctor'], io(home, home, noRemote, fetchImpl, out))).toBe(11);
+      expect(await runCli(['doctor'], io(home, home, noRemote, fetchImpl, out))).toBe(21);
       const text = out.join('');
       expect(text).toContain('✗ API at http://10.0.0.5:3000');
       return text;

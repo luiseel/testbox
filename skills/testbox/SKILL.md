@@ -42,8 +42,9 @@ testbox run "<command>" --json --quiet    # any command, same flow
 | 12 | timeout, or the worker stopped during the job (`lease_expired`) | raise `--timeout` or find the hang; for `lease_expired`, run `testbox doctor` |
 | 13 | cancelled | someone cancelled it, or a newer submit replaced it |
 | 20 | auth | the token is wrong; the user must ask an admin for a new `testbox setup` line |
+| 21 | the API does not answer: no route to it, nothing listens, or it timed out | run `testbox doctor`; its fix line says whether it is the VPN or a stopped control plane |
 
-Only exit 1 means the code is broken. For 10, 11, 12, 20, do not change the code to "fix" it. Run `testbox doctor --json` (each check is a line, with a `fix`), report the problem and the fix it prints, and stop if the fix needs the user (SSH key, GUI login, Local Network permission, token).
+Only exit 1 means the code is broken. For 10, 11, 12, 20, 21, do not change the code to "fix" it. Run `testbox doctor --json` (each check is a line, with a `fix`), report the problem and the fix it prints, and stop if the fix needs the user (SSH key, GUI login, Local Network permission, token).
 
 ## testbox.yml
 
