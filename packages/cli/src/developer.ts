@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { buildSshArgs, ExitCode, loadRepoConfig } from '@testbox/shared';
 import { Output } from './output';
-import { CliApiError, HttpApi } from './api-client';
+import { type ApiHealth, CliApiError, HttpApi } from './api-client';
 import { exitCodeForFailure, TestboxApp, type CliIO } from './commands';
 import { readUserConfig, type UserConfig } from './config-store';
 import { resolveLink, sameCheckoutAs, type LinkedCheckout } from './links';
@@ -33,6 +33,22 @@ async function exists(file: string): Promise<boolean> {
 }
 
 /** `testbox setup`, `testbox doctor`, and `testbox init`: the developer side. */
+
+const RESTART_CONTROL_PLANE = 'cd ~/testbox/app && docker compose up -d';
+
+/** What to do when the API does not answer. The reason tells the network problem from a stopped control plane. */
+export function apiDownFix(apiUrl: string, health: Exclude<ApiHealth, { ok: true }>): string {
+  const host = new URL(apiUrl).host;
+  switch (health.reason) {
+    case 'refused':
+      return `${host} is up, but the API is not running (${health.detail}). An admin runs on that host: ${RESTART_CONTROL_PLANE}`;
+    case 'unhealthy':
+      return `the API answers ${health.detail} but is not healthy. An admin runs on ${host}: ${RESTART_CONTROL_PLANE} && docker compose logs api`;
+    case 'unreachable':
+      return `no answer from ${host} (${health.detail}). Not on the office LAN? Turn on your VPN. On the LAN or VPN already? Then the control plane is stopped, for example after a reboot: an admin runs on ${host}: ${RESTART_CONTROL_PLANE}`;
+  }
+}
+
 export class DeveloperApp {
   constructor(
     private readonly io: CliIO,
@@ -118,12 +134,9 @@ export class DeveloperApp {
       return stop(ExitCode.Auth);
     }
     const api = new HttpApi(user.apiUrl, user.token, this.io.fetchImpl);
-    if (!(await api.healthy())) {
-      add({
-        ok: false,
-        label: `API at ${user.apiUrl}`,
-        fix: `not on the office LAN? Turn on your VPN; it must reach ${new URL(user.apiUrl).host}`,
-      });
+    const health = await api.health();
+    if (!health.ok) {
+      add({ ok: false, label: `API at ${user.apiUrl}`, fix: apiDownFix(user.apiUrl, health) });
       return stop(ExitCode.NoWorker);
     }
     add({ ok: true, label: `API at ${user.apiUrl}` });

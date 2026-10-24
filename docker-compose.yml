@@ -5,6 +5,8 @@ name: testbox
 services:
   redis:
     image: redis:7-alpine
+    # Come back after a reboot of the host.
+    restart: unless-stopped
     # Workers on other hosts connect to this port, so set TESTBOX_REDIS_PASSWORD
     # on a LAN. Empty means no password (local development only).
     environment:
@@ -31,6 +33,7 @@ services:
     build:
       context: .
       dockerfile: packages/api/Dockerfile
+    restart: unless-stopped
     environment:
       PORT: 3000
       REDIS_URL: redis://:${TESTBOX_REDIS_PASSWORD:-}@redis:6379
