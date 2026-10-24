@@ -41,9 +41,9 @@ export function apiDownFix(apiUrl: string, health: Exclude<ApiHealth, { ok: true
   const host = new URL(apiUrl).host;
   switch (health.reason) {
     case 'refused':
-      return `${host} is up, but the API is not running (${health.detail}). An admin runs on that host: ${RESTART_CONTROL_PLANE}`;
+      return `${host} is up, but the API is not running (${health.detail}). An admin runs on that host: ${RESTART_CONTROL_PLANE}. When the API is back, run testbox admin upgrade once, so the containers come back after the next reboot`;
     case 'unhealthy':
-      return `the API answers ${health.detail} but is not healthy. An admin runs on ${host}: ${RESTART_CONTROL_PLANE} && docker compose logs api`;
+      return `the API answers ${health.detail} but is not healthy. An admin runs on ${host}: cd ~/testbox/app && docker compose logs api && docker compose restart api`;
     case 'unreachable':
       return `no answer from ${host} (${health.detail}). Not on the office LAN? Turn on your VPN. On the LAN or VPN already? Then the control plane is stopped, for example after a reboot: an admin runs on ${host}: ${RESTART_CONTROL_PLANE}`;
   }

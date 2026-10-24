@@ -94,6 +94,7 @@ describe('testbox doctor', () => {
       const refused = await fixFor(failing('ECONNREFUSED'));
       expect(refused).toContain('10.0.0.5:3000 is up, but the API is not running (ECONNREFUSED)');
       expect(refused).toContain('cd ~/testbox/app && docker compose up -d');
+      expect(refused).toContain('run testbox admin upgrade once');
       expect(refused).not.toContain('VPN');
 
       // No answer at all: the network, or a stopped host. Say both.
@@ -105,7 +106,7 @@ describe('testbox doctor', () => {
       // The API answers, but not with 200: for example Redis is down behind it.
       const unhealthy = await fixFor((async () => new Response('', { status: 503 })) as typeof fetch);
       expect(unhealthy).toContain('the API answers HTTP 503 but is not healthy');
-      expect(unhealthy).toContain('docker compose logs api');
+      expect(unhealthy).toContain('docker compose logs api && docker compose restart api');
     } finally {
       await rm(home, { recursive: true, force: true });
     }

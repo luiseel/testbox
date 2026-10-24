@@ -102,6 +102,7 @@ export class HttpApi {
     return this.request('POST', `/v1/users/${encodeURIComponent(userId)}/tokens`);
   }
 
+  /** True when the API answers the health check. `admin` polls this while the control plane starts. */
   async healthy(): Promise<boolean> {
     return (await this.health()).ok;
   }
