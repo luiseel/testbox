@@ -39,7 +39,9 @@ describe('bootstrap scripts', () => {
     );
     const script = await composeScript('read-secrets', { TB_REPO_DIR: `${repo}/../${path.basename(repo)}` });
     expect(script.startsWith(`export TB_REPO_DIR='${repo}/../${path.basename(repo)}'`)).toBe(true);
-    await expect(composeScript('read-secrets', { 'TB_X; rm -rf /': 'x' })).rejects.toThrow(/invalid bootstrap variable/);
+    await expect(composeScript('read-secrets', { 'TB_X; rm -rf /': 'x' })).rejects.toThrow(
+      /invalid bootstrap variable/,
+    );
 
     const secrets = await runBootstrap<Record<string, string>>({
       runner: localBash,
@@ -47,7 +49,13 @@ describe('bootstrap scripts', () => {
       script: 'read-secrets',
       env: { TB_REPO_DIR: repo },
     });
-    expect(secrets).toEqual({ workerToken: 'w0rker', bootstrapToken: 'b00t', redisPassword: 'pa55', apiPort: '3000', redisPort: '6379' });
+    expect(secrets).toEqual({
+      workerToken: 'w0rker',
+      bootstrapToken: 'b00t',
+      redisPassword: 'pa55',
+      apiPort: '3000',
+      redisPort: '6379',
+    });
 
     await rm(path.join(repo, '.env'));
     await expect(
@@ -89,13 +97,24 @@ describe('bootstrap scripts', () => {
   it('follows a rewritten branch but never drops a commit that exists only on the host', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'tb-git-'));
     const git = (cwd: string, ...args: string[]) =>
-      promisify(execFile)('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'init.defaultBranch=main', ...args], { cwd });
+      promisify(execFile)(
+        'git',
+        ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'init.defaultBranch=main', ...args],
+        { cwd },
+      );
     const dir = path.join(root, 'scripts');
     await mkdir(dir);
     await copyFile(path.join(bootstrapDir(), 'lib.sh'), path.join(dir, 'lib.sh'));
-    await writeFile(path.join(dir, 'sync.sh'), 'sync_repo "$TB_DIR"\nresult "{\\"head\\":\\"$(git -C "$TB_DIR" log -1 --format=%s)\\"}"\n');
+    await writeFile(
+      path.join(dir, 'sync.sh'),
+      'sync_repo "$TB_DIR"\nresult "{\\"head\\":\\"$(git -C "$TB_DIR" log -1 --format=%s)\\"}"\n',
+    );
     const sync = async () => {
-      const input = await composeScript('sync', { TB_DIR: path.join(root, 'host'), TB_GIT_URL: path.join(root, 'origin.git'), TB_GIT_REF: 'main' }, dir);
+      const input = await composeScript(
+        'sync',
+        { TB_DIR: path.join(root, 'host'), TB_GIT_URL: path.join(root, 'origin.git'), TB_GIT_REF: 'main' },
+        dir,
+      );
       return localBash.run('ssh', [], { input });
     };
     try {
@@ -138,7 +157,10 @@ describe('bootstrap scripts', () => {
     await mkdir(stubs);
     for (const name of ['launchctl', 'systemctl']) {
       // `launchctl print` exits 1: the agent is not loaded, so install does not wait.
-      await writeFile(path.join(stubs, name), `#!/bin/sh\necho "$0 $*" >> "${home}/calls.log"\n[ "$1" = print ] && exit 1\nexit 0\n`);
+      await writeFile(
+        path.join(stubs, name),
+        `#!/bin/sh\necho "$0 $*" >> "${home}/calls.log"\n[ "$1" = print ] && exit 1\nexit 0\n`,
+      );
       await chmod(path.join(stubs, name), 0o755);
     }
     await mkdir(path.join(repo, 'packages', 'worker', 'dist'), { recursive: true });
@@ -158,7 +180,10 @@ describe('bootstrap scripts', () => {
     };
     const run = promisify(execFile);
     const mainJs = path.join(repo, 'packages', 'worker', 'dist', 'main.js');
-    const hadMain = await stat(mainJs).then(() => true, () => false);
+    const hadMain = await stat(mainJs).then(
+      () => true,
+      () => false,
+    );
     if (!hadMain) await writeFile(mainJs, '');
     try {
       await run('sh', [path.join(repo, 'deploy', 'install-launchagent.sh')], { env });
@@ -206,11 +231,17 @@ describe('testbox admin', () => {
         if ((opts?.input ?? '').includes('Print the control-plane secrets')) {
           return {
             code: 0,
-            stdout: 'TESTBOX_RESULT {"workerToken":"w","bootstrapToken":"boot","redisPassword":"r","apiPort":"3000","redisPort":"6379"}\n',
+            stdout:
+              'TESTBOX_RESULT {"workerToken":"w","bootstrapToken":"boot","redisPassword":"r","apiPort":"3000","redisPort":"6379"}\n',
             stderr: '',
           };
         }
-        return { code: 0, stdout: 'TESTBOX_RESULT {"apiPort":3000,"redisPort":6379,"repoDir":"/home/x/testbox/app","redisPasswordAdded":true}\n', stderr: '' };
+        return {
+          code: 0,
+          stdout:
+            'TESTBOX_RESULT {"apiPort":3000,"redisPort":6379,"repoDir":"/home/x/testbox/app","redisPasswordAdded":true}\n',
+          stderr: '',
+        };
       },
     };
     const users = new Map<string, string>();
@@ -284,7 +315,8 @@ describe('testbox admin', () => {
         if (input.includes('Print the control-plane secrets')) {
           return {
             code: 0,
-            stdout: 'TESTBOX_RESULT {"workerToken":"w0rker","bootstrapToken":"boot","redisPassword":"pa55","apiPort":"3000","redisPort":"6379"}\n',
+            stdout:
+              'TESTBOX_RESULT {"workerToken":"w0rker","bootstrapToken":"boot","redisPassword":"pa55","apiPort":"3000","redisPort":"6379"}\n',
             stderr: '',
           };
         }
@@ -293,7 +325,8 @@ describe('testbox admin', () => {
         }
         return {
           code: 0,
-          stdout: 'TESTBOX_RESULT {"os":"linux","workerId":"box-1","xcode":false,"localNetworkBlocked":false,"node":"v22.23.3"}\n',
+          stdout:
+            'TESTBOX_RESULT {"os":"linux","workerId":"box-1","xcode":false,"localNetworkBlocked":false,"node":"v22.23.3"}\n',
           stderr: '',
         };
       },
@@ -315,7 +348,13 @@ describe('testbox admin', () => {
       return new Response('{}', { status: 404 });
     };
     await writeAdminConfig(home, {
-      controlPlane: { sshHost: 'me@10.0.0.5', address: '10.0.0.5', apiPort: 3000, redisPort: 6379, repoDir: '~/testbox/app' },
+      controlPlane: {
+        sshHost: 'me@10.0.0.5',
+        address: '10.0.0.5',
+        apiPort: 3000,
+        redisPort: 6379,
+        repoDir: '~/testbox/app',
+      },
     });
     const io = {
       homeDir: home,
@@ -369,8 +408,10 @@ async function fastClock<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-const SECRETS = 'TESTBOX_RESULT {"workerToken":"w","bootstrapToken":"boot","redisPassword":"","apiPort":"3000","redisPort":"6379"}\n';
-const WORKER = 'TESTBOX_RESULT {"os":"linux","workerId":"box-1","xcode":false,"localNetworkBlocked":false,"node":"v22.23.3"}\n';
+const SECRETS =
+  'TESTBOX_RESULT {"workerToken":"w","bootstrapToken":"boot","redisPassword":"","apiPort":"3000","redisPort":"6379"}\n';
+const WORKER =
+  'TESTBOX_RESULT {"os":"linux","workerId":"box-1","xcode":false,"localNetworkBlocked":false,"node":"v22.23.3"}\n';
 
 /**
  * A home with a control plane, and an SSH stand-in that answers the read-secrets script.
@@ -380,16 +421,27 @@ async function adminHome(
   ssh: (input: string, args: string[]) => CommandResult,
   fetchImpl: (url: URL, init?: RequestInit) => Response,
   options: { mutagen?: boolean } = {},
-): Promise<{ home: string; stdout: string[]; run: (argv: string[]) => Promise<{ code: number; summary: Record<string, unknown> }> }> {
+): Promise<{
+  home: string;
+  stdout: string[];
+  run: (argv: string[]) => Promise<{ code: number; summary: Record<string, unknown> }>;
+}> {
   const home = await mkdtemp(path.join(os.tmpdir(), 'tb-admin-j-'));
   await writeAdminConfig(home, {
-    controlPlane: { sshHost: 'me@10.0.0.5', address: '10.0.0.5', apiPort: 3000, redisPort: 6379, repoDir: '~/testbox/app' },
+    controlPlane: {
+      sshHost: 'me@10.0.0.5',
+      address: '10.0.0.5',
+      apiPort: 3000,
+      redisPort: 6379,
+      repoDir: '~/testbox/app',
+    },
   });
   const stdout: string[] = [];
   const remote: RemoteRunner = {
     async run(file, args, opts): Promise<CommandResult> {
       if (file === 'git') return { code: 0, stdout: 'git@example.com:me/testbox.git\n', stderr: '' };
-      if (file === 'mutagen' && !options.mutagen) return { code: 1, stdout: '', stderr: 'mutagen daemon is not running' };
+      if (file === 'mutagen' && !options.mutagen)
+        return { code: 1, stdout: '', stderr: 'mutagen daemon is not running' };
       if (file === 'mutagen') return { code: 0, stdout: args[1] === 'list' ? '[]' : '', stderr: '' };
       const input = opts?.input ?? '';
       if (input.includes('Print the control-plane secrets')) return { code: 0, stdout: SECRETS, stderr: '' };
@@ -405,12 +457,17 @@ async function adminHome(
     isTTY: false,
     signals: new EventEmitter(),
     prompt: async () => '',
-    fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => fetchImpl(new URL(String(url)), init)) as typeof fetch,
+    fetchImpl: (async (url: string | URL | Request, init?: RequestInit) =>
+      fetchImpl(new URL(String(url)), init)) as typeof fetch,
   };
   const run = async (argv: string[]) => {
     stdout.length = 0;
     const code = await runCli([...argv, '--json'], io);
-    const lines = stdout.join('').trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+    const lines = stdout
+      .join('')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(lines.filter((line) => line.type === 'summary')).toHaveLength(1);
     const summary = lines.at(-1) as Record<string, unknown>;
     expect(summary).toMatchObject({ type: 'summary', exit: code });
@@ -425,7 +482,10 @@ describe('testbox admin --json: a summary on every path', () => {
   it('exits 2 for a missing address and a bad key, and maps an API error to its exit code', async () => {
     const { home, run } = await adminHome(
       () => ({ code: 0, stdout: 'TESTBOX_RESULT {"added":true}\n', stderr: '' }),
-      (url) => (url.pathname === '/v1/users' ? json({ error: { code: 'AUTH', message: 'invalid token' } }, 401) : json({ workers: [] })),
+      (url) =>
+        url.pathname === '/v1/users'
+          ? json({ error: { code: 'AUTH', message: 'invalid token' } }, 401)
+          : json({ workers: [] }),
     );
     try {
       const init = await run(['admin', 'init-control-plane', 'omarchy.local']);
@@ -448,8 +508,13 @@ describe('testbox admin --json: a summary on every path', () => {
     ];
     const { home, run } = await adminHome(
       (input, args) => {
-        if (args.includes('bad@10.0.0.8')) return { code: 255, stdout: '', stderr: 'bad@10.0.0.8: Permission denied (publickey).' };
-        return { code: 0, stdout: input.includes('TB_PUBLIC_KEY') ? 'TESTBOX_RESULT {"added":true}\n' : WORKER, stderr: '' };
+        if (args.includes('bad@10.0.0.8'))
+          return { code: 255, stdout: '', stderr: 'bad@10.0.0.8: Permission denied (publickey).' };
+        return {
+          code: 0,
+          stdout: input.includes('TB_PUBLIC_KEY') ? 'TESTBOX_RESULT {"added":true}\n' : WORKER,
+          stderr: '',
+        };
       },
       () => json({ workers }),
     );
@@ -466,10 +531,14 @@ describe('testbox admin --json: a summary on every path', () => {
   });
 
   it('exits 11 when the API does not answer or the worker sends no heartbeat', async () => {
-    const result = 'TESTBOX_RESULT {"apiPort":3000,"redisPort":6379,"repoDir":"~/testbox/app","redisPasswordAdded":false}\n';
+    const result =
+      'TESTBOX_RESULT {"apiPort":3000,"redisPort":6379,"repoDir":"~/testbox/app","redisPasswordAdded":false}\n';
     const { home, run } = await adminHome(
       (input) => ({ code: 0, stdout: input.includes("TB_MODE='install'") ? WORKER : result, stderr: '' }),
-      (url) => (url.pathname === '/v1/healthz' ? new Response('', { status: 502 }) : json({ workers: [{ id: 'box-1', healthy: false, labels: [] }] })),
+      (url) =>
+        url.pathname === '/v1/healthz'
+          ? new Response('', { status: 502 })
+          : json({ workers: [{ id: 'box-1', healthy: false, labels: [] }] }),
     );
     try {
       const init = await fastClock(() => run(['admin', 'init-control-plane', 'me@10.0.0.5']));
@@ -480,7 +549,9 @@ describe('testbox admin --json: a summary on every path', () => {
       expect(worker.code).toBe(11);
       expect(worker.summary.error).toContain('box-1 sent no heartbeat');
       expect(worker.summary.error).toContain('~/testbox/logs/worker.stderr.log');
-      const custom = await fastClock(() => run(['admin', 'add-worker', 'me@10.0.0.7', '--no-smoke', '--data-dir', '/srv/tb']));
+      const custom = await fastClock(() =>
+        run(['admin', 'add-worker', 'me@10.0.0.7', '--no-smoke', '--data-dir', '/srv/tb']),
+      );
       expect(custom.summary.error).toContain('/srv/tb/logs/worker.stderr.log');
     } finally {
       await rm(home, { recursive: true, force: true });
@@ -505,19 +576,29 @@ describe('testbox admin --json: a summary on every path', () => {
   it('ends add-worker with exit 1 when the test job fails on the worker', async () => {
     const snapshot = `${JSON.stringify({ digest: 'ab'.repeat(32), relPath: 'snapshots/snap' })}\n`;
     const { home, run } = await adminHome(
-      (_input, args) => ({ code: 0, stdout: (args.at(-1) ?? '').includes('snapshot-cli') ? snapshot : WORKER, stderr: '' }),
+      (_input, args) => ({
+        code: 0,
+        stdout: (args.at(-1) ?? '').includes('snapshot-cli') ? snapshot : WORKER,
+        stderr: '',
+      }),
       (url, init) => {
         const method = init?.method ?? 'GET';
         if (url.pathname.endsWith('/workspaces') && method === 'POST') {
-          return json({ id: 'ws_smoke', project: 'testbox-smoke', stagingRel: 'workspaces/usr_1/testbox-smoke/ws_smoke' }, 201);
+          return json(
+            { id: 'ws_smoke', project: 'testbox-smoke', stagingRel: 'workspaces/usr_1/testbox-smoke/ws_smoke' },
+            201,
+          );
         }
-        if (url.pathname.includes('/workers/select')) return json({ worker: { id: 'box-1', sshHost: 'me@10.0.0.7', labels: ['linux'] } });
+        if (url.pathname.includes('/workers/select'))
+          return json({ worker: { id: 'box-1', sshHost: 'me@10.0.0.7', labels: ['linux'] } });
         if (url.pathname.endsWith('/snapshots')) return json({ id: 'snap', digest: 'ab'.repeat(32) }, 201);
         if (url.pathname.endsWith('/jobs') && method === 'POST') {
           return json({ job: { id: 'job_smoke', state: 'queued', exitCode: null, error: null }, superseded: [] }, 201);
         }
         if (url.pathname.endsWith('/events')) {
-          return new Response('event: done\ndata: {"state":"failed","exitCode":3,"error":"exit 3"}\n\n', { status: 200 });
+          return new Response('event: done\ndata: {"state":"failed","exitCode":3,"error":"exit 3"}\n\n', {
+            status: 200,
+          });
         }
         return json({ workers: [{ id: 'box-1', healthy: true, labels: ['linux'] }] });
       },

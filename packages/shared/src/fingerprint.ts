@@ -33,16 +33,11 @@ export function hashContent(content: string | Buffer): string {
 export function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(',')}]`;
-  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
-    a.localeCompare(b),
-  );
+  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b));
   return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`).join(',')}}`;
 }
 
-export function buildFingerprint(
-  lockfiles: Record<string, string>,
-  runtime: RuntimeFacts,
-): DependencyFingerprint {
+export function buildFingerprint(lockfiles: Record<string, string>, runtime: RuntimeFacts): DependencyFingerprint {
   const sorted: Record<string, string> = {};
   for (const key of Object.keys(lockfiles).sort()) sorted[key] = lockfiles[key];
   return {
@@ -59,10 +54,7 @@ export function fingerprintDigest(fp: DependencyFingerprint): string {
   return hashContent(stableStringify(fp));
 }
 
-export function needsDependencyRefresh(
-  previous: DependencyFingerprint | null,
-  next: DependencyFingerprint,
-): boolean {
+export function needsDependencyRefresh(previous: DependencyFingerprint | null, next: DependencyFingerprint): boolean {
   if (!previous) return true;
   return fingerprintDigest(previous) !== fingerprintDigest(next);
 }
@@ -95,9 +87,6 @@ export async function collectLockfiles(root: string): Promise<Record<string, str
   return found;
 }
 
-export async function fingerprintFromDirectory(
-  root: string,
-  runtime: RuntimeFacts,
-): Promise<DependencyFingerprint> {
+export async function fingerprintFromDirectory(root: string, runtime: RuntimeFacts): Promise<DependencyFingerprint> {
   return buildFingerprint(await collectLockfiles(root), runtime);
 }

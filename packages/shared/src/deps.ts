@@ -2,10 +2,7 @@ import { execFile as execFileCb } from 'child_process';
 import { access, mkdir, readdir, readFile, rm, writeFile } from 'fs/promises';
 import path from 'path';
 import { promisify } from 'util';
-import {
-  fingerprintDigest,
-  type DependencyFingerprint,
-} from './fingerprint';
+import { fingerprintDigest, type DependencyFingerprint } from './fingerprint';
 
 const execFile = promisify(execFileCb);
 

@@ -121,14 +121,16 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
       code = await developerApp.init(Boolean(opts.force));
     });
 
-  common(program.command('start').description('start syncing this repo to the workers'))
-    .action(async (opts) => {
+  common(program.command('start').description('start syncing this repo to the workers')).action(async (opts) => {
     code = await app.start(opts);
   });
 
-  program.command('stop').description('stop syncing this repo').action(async () => {
-    code = await app.stop();
-  });
+  program
+    .command('stop')
+    .description('stop syncing this repo')
+    .action(async () => {
+      code = await app.stop();
+    });
 
   program
     .command('profiles')
@@ -137,22 +139,29 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
       code = await app.profiles();
     });
 
-  linkFlag(common(
-    program
-      .command('run')
-      .description('run a command on a worker')
-      .argument('<command>', 'command to run')
-      .option(
-        '--profile <name>',
-        'use the requires, artifacts, and links of this profile; the job replaces a queued job of the same profile in this workspace',
-      ),
-  ))
-    .action(async (command: string, opts) => {
-      code = await app.run(command, opts);
-    });
+  linkFlag(
+    common(
+      program
+        .command('run')
+        .description('run a command on a worker')
+        .argument('<command>', 'command to run')
+        .option(
+          '--profile <name>',
+          'use the requires, artifacts, and links of this profile; the job replaces a queued job of the same profile in this workspace',
+        ),
+    ),
+  ).action(async (command: string, opts) => {
+    code = await app.run(command, opts);
+  });
 
-  linkFlag(common(program.command('verify').description('run a profile from testbox.yml on a worker').argument('<profile>', 'profile from testbox.yml')))
-    .action(async (profile: string, opts) => {
+  linkFlag(
+    common(
+      program
+        .command('verify')
+        .description('run a profile from testbox.yml on a worker')
+        .argument('<profile>', 'profile from testbox.yml'),
+    ),
+  ).action(async (profile: string, opts) => {
     code = await app.verify(profile, opts);
   });
 

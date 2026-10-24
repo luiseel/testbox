@@ -197,10 +197,13 @@ profiles:
   });
 
   it('parses links as safe names, default none, and rejects a bad, repeated, or project name', () => {
-    const config = parseTestboxConfig('project: interface\nprofiles:\n  unit:\n    cmd: make\n  ios:\n    cmd: xcodebuild\n    links: [api, shared.kit]\n');
+    const config = parseTestboxConfig(
+      'project: interface\nprofiles:\n  unit:\n    cmd: make\n  ios:\n    cmd: xcodebuild\n    links: [api, shared.kit]\n',
+    );
     expect(config.profiles.unit.links).toEqual([]);
     expect(config.profiles.ios.links).toEqual(['api', 'shared.kit']);
-    const bad = (links: string) => () => parseTestboxConfig(`project: interface\nprofiles:\n  ios:\n    cmd: x\n    links: ${links}\n`);
+    const bad = (links: string) => () =>
+      parseTestboxConfig(`project: interface\nprofiles:\n  ios:\n    cmd: x\n    links: ${links}\n`);
     expect(bad('[../api]')).toThrow(ConfigError);
     expect(bad('[../api]')).toThrow('a link name must match');
     expect(bad('[api, api]')).toThrow('a link name is listed twice');
@@ -239,11 +242,20 @@ describe('glob and redaction', () => {
 
 describe('job source', () => {
   it.each([
-    [{ path: '/Users/ana/code/app', branch: 'TGN-811', commit: '3edf65d', dirty: true }, 'source: /Users/ana/code/app TGN-811@3edf65d (dirty)'],
-    [{ path: '/Users/ana/code/app', branch: 'main', commit: '3edf65d', dirty: false }, 'source: /Users/ana/code/app main@3edf65d'],
+    [
+      { path: '/Users/ana/code/app', branch: 'TGN-811', commit: '3edf65d', dirty: true },
+      'source: /Users/ana/code/app TGN-811@3edf65d (dirty)',
+    ],
+    [
+      { path: '/Users/ana/code/app', branch: 'main', commit: '3edf65d', dirty: false },
+      'source: /Users/ana/code/app main@3edf65d',
+    ],
     [{ path: '/Users/ana/code/app', commit: '3edf65d' }, 'source: /Users/ana/code/app 3edf65d'],
     [{ path: '/Users/ana/code/app' }, 'source: /Users/ana/code/app'],
-    [{ path: '/Users/ana/code/app\nfake: line', branch: 'main\x1b[31m' }, 'source: /Users/ana/code/app fake: line main [31m'],
+    [
+      { path: '/Users/ana/code/app\nfake: line', branch: 'main\x1b[31m' },
+      'source: /Users/ana/code/app fake: line main [31m',
+    ],
     [
       {
         path: '/code/interface_TGN-821',
@@ -373,12 +385,26 @@ describe('quoting and path safety', () => {
 
   it('builds the exact ssh argv, with and without a key', () => {
     expect(buildSshArgs('testbox@builder-1', 'echo hi')).toEqual([
-      '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', 'testbox@builder-1', '--', 'echo hi',
+      '-o',
+      'BatchMode=yes',
+      '-o',
+      'StrictHostKeyChecking=accept-new',
+      'testbox@builder-1',
+      '--',
+      'echo hi',
     ]);
     expect(buildSshArgs('testbox@builder-1', 'echo hi', '/k/id_ed25519')).toEqual([
-      '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new',
-      '-i', '/k/id_ed25519', '-o', 'IdentitiesOnly=yes',
-      'testbox@builder-1', '--', 'echo hi',
+      '-o',
+      'BatchMode=yes',
+      '-o',
+      'StrictHostKeyChecking=accept-new',
+      '-i',
+      '/k/id_ed25519',
+      '-o',
+      'IdentitiesOnly=yes',
+      'testbox@builder-1',
+      '--',
+      'echo hi',
     ]);
     expect(() => buildSshArgs('h', 'true', 'a\nb')).toThrow(/unsafe identity file/);
   });
@@ -387,7 +413,17 @@ describe('quoting and path safety', () => {
 describe('config rules', () => {
   it('ignores the full default list when testbox.yml has no ignore', () => {
     expect(DEFAULT_IGNORE).toEqual([
-      'node_modules', '.next', '.git', '.env', '.env.*', 'dist', 'build', 'coverage', 'DerivedData', '.turbo', '.testbox',
+      'node_modules',
+      '.next',
+      '.git',
+      '.env',
+      '.env.*',
+      'dist',
+      'build',
+      'coverage',
+      'DerivedData',
+      '.turbo',
+      '.testbox',
     ]);
     expect(parseTestboxConfig('project: demo\n').ignore).toEqual(DEFAULT_IGNORE);
   });
@@ -446,9 +482,18 @@ describe('lockfiles and installs', () => {
       await mkdir(snapshotDir);
       await writeFile(path.join(snapshotDir, 'package.json'), '{}\n');
       await writeFile(path.join(snapshotDir, 'pnpm-lock.yaml'), 'lock\n');
-      const fingerprint = buildFingerprint({}, { nodeVersion: null, arch: 'x64', platform: 'linux', xcodeVersion: null });
+      const fingerprint = buildFingerprint(
+        {},
+        { nodeVersion: null, arch: 'x64', platform: 'linux', xcodeVersion: null },
+      );
       await expect(
-        ensureDependencies({ snapshotDir, cacheDir: path.join(dir, 'cache'), workspaceKey: 'ws', fingerprint, install: async () => code }),
+        ensureDependencies({
+          snapshotDir,
+          cacheDir: path.join(dir, 'cache'),
+          workspaceKey: 'ws',
+          fingerprint,
+          install: async () => code,
+        }),
       ).rejects.toThrow(`dependency install failed with exit ${code}`);
     } finally {
       await rm(dir, { recursive: true, force: true });

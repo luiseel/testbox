@@ -167,13 +167,7 @@ export class Daemon {
       let claimed = false;
       try {
         while (this.processing && this.inflight < this.capacity) {
-          const job = await claimNextJob(
-            this.store,
-            this.opts.workerId,
-            Date.now,
-            this.heartbeatTtlMs,
-            this.leaseMs,
-          );
+          const job = await claimNextJob(this.store, this.opts.workerId, Date.now, this.heartbeatTtlMs, this.leaseMs);
           if (!job) break;
           claimed = true;
           this.launch(job);
@@ -216,9 +210,12 @@ export class Daemon {
     const abort = new AbortController();
     this.aborts.set(jobId, abort);
     if (this.stopping) abort.abort('shutdown');
-    const renew = setInterval(() => {
-      void this.renew(jobId, abort);
-    }, Math.max(50, Math.floor(this.leaseMs / 3)));
+    const renew = setInterval(
+      () => {
+        void this.renew(jobId, abort);
+      },
+      Math.max(50, Math.floor(this.leaseMs / 3)),
+    );
     const stopRenew = () => clearInterval(renew);
     this.renewals.set(jobId, stopRenew);
     // The claim can end close to its lease on a slow link; do not wait a full interval.
@@ -360,7 +357,10 @@ export class Daemon {
   }
 
   /** Writes log lines without waiting; `flush` waits for all of them, so a job ends with its full log. */
-  private logWriter(jobId: string): { write: (stream: 'stdout' | 'stderr', text: string) => void; flush: () => Promise<void> } {
+  private logWriter(jobId: string): {
+    write: (stream: 'stdout' | 'stderr', text: string) => void;
+    flush: () => Promise<void>;
+  } {
     const pending = new Set<Promise<void>>();
     return {
       write: (stream, text) => {
@@ -384,7 +384,12 @@ export class Daemon {
     await appendFile(path.join(dir, stream === 'stdout' ? 'stdout.log' : 'stderr.log'), `${text}\n`);
     const job = await this.store.getJob(jobId);
     if (job) {
-      await writeRetention(this.opts.dataDir, 'logs', jobId, job.retentionUntil || Date.now() + (this.opts.retentionMs ?? DEFAULT_RETENTION_MS));
+      await writeRetention(
+        this.opts.dataDir,
+        'logs',
+        jobId,
+        job.retentionUntil || Date.now() + (this.opts.retentionMs ?? DEFAULT_RETENTION_MS),
+      );
     }
   }
 

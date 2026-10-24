@@ -102,7 +102,9 @@ export class MutagenSsh {
 
   /** Create the staging tree on the worker; Mutagen will not create a missing beta root parent. */
   async ensureStaging(remoteRoot: string, stagingRel: string): Promise<void> {
-    const segments = homeRelative(remoteRoot, stagingRel).split('/').filter((segment) => segment.length > 0);
+    const segments = homeRelative(remoteRoot, stagingRel)
+      .split('/')
+      .filter((segment) => segment.length > 0);
     for (const segment of segments) {
       if (!/^[A-Za-z0-9._-]+$/.test(segment)) throw new SyncError(`unsafe remote path segment: ${segment}`);
     }

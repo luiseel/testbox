@@ -1,21 +1,8 @@
-export const JOB_STATES = [
-  'queued',
-  'assigned',
-  'running',
-  'succeeded',
-  'failed',
-  'cancelled',
-  'timed_out',
-] as const;
+export const JOB_STATES = ['queued', 'assigned', 'running', 'succeeded', 'failed', 'cancelled', 'timed_out'] as const;
 
 export type JobState = (typeof JOB_STATES)[number];
 
-export const TERMINAL_STATES: ReadonlySet<JobState> = new Set([
-  'succeeded',
-  'failed',
-  'cancelled',
-  'timed_out',
-]);
+export const TERMINAL_STATES: ReadonlySet<JobState> = new Set(['succeeded', 'failed', 'cancelled', 'timed_out']);
 
 const TRANSITIONS: Record<JobState, readonly JobState[]> = {
   queued: ['assigned', 'cancelled'],
@@ -48,9 +35,7 @@ export class IllegalTransitionError extends Error {
  */
 export function assertTransition(from: JobState, to: JobState): void {
   if (isTerminal(from)) {
-    throw new IllegalTransitionError(
-      `job is ${from}; a completed job is never re-executed`,
-    );
+    throw new IllegalTransitionError(`job is ${from}; a completed job is never re-executed`);
   }
   if (!canTransition(from, to)) {
     throw new IllegalTransitionError(`cannot transition ${from} -> ${to}`);

@@ -7,7 +7,9 @@ import { probeRuntime } from './probe';
 
 function extraLabels(env: NodeJS.ProcessEnv): string[] {
   if (!env.TESTBOX_LABELS) return [];
-  return env.TESTBOX_LABELS.split(',').map((label) => label.trim()).filter(Boolean);
+  return env.TESTBOX_LABELS.split(',')
+    .map((label) => label.trim())
+    .filter(Boolean);
 }
 
 function numberFrom(value: string | undefined, fallback: number): number {
@@ -16,7 +18,11 @@ function numberFrom(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed >= 1 ? Math.trunc(parsed) : fallback;
 }
 
-async function loadLabels(env: NodeJS.ProcessEnv, dataDir: string, workerId: string): Promise<{
+async function loadLabels(
+  env: NodeJS.ProcessEnv,
+  dataDir: string,
+  workerId: string,
+): Promise<{
   labels: string[];
   capacity?: number;
   sshHost?: string;

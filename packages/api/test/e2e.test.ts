@@ -191,7 +191,10 @@ describe('queue and execution', () => {
       ignore: [],
       retentionMs: 60_000,
     });
-    await call(ctx, alice.token, 'POST', `/v1/workspaces/${ws.json.id}/snapshots`, { id: snapshotId, digest: snap.digest });
+    await call(ctx, alice.token, 'POST', `/v1/workspaces/${ws.json.id}/snapshots`, {
+      id: snapshotId,
+      digest: snap.digest,
+    });
     const created = await call(ctx, alice.token, 'POST', '/v1/jobs', {
       workspaceId: ws.json.id,
       snapshotId,
@@ -203,7 +206,9 @@ describe('queue and execution', () => {
     const job = await waitJob(ctx, alice.token, created.json.job.id);
     expect(job.state).toBe('succeeded');
     const stored = await call(ctx, alice.token, 'GET', `/v1/jobs/${job.id}/logs`);
-    expect(stored.json.lines.map((l: { line: string }) => l.line).filter((l: string) => /^\d+$/.test(l))).toHaveLength(300);
+    expect(stored.json.lines.map((l: { line: string }) => l.line).filter((l: string) => /^\d+$/.test(l))).toHaveLength(
+      300,
+    );
     const sse = await stream;
     expect(sse.done).not.toBe('');
     expect(sse.logs.filter((l) => /^\d+$/.test(l))).toEqual(Array.from({ length: 300 }, (_, i) => String(i + 1)));
@@ -229,7 +234,11 @@ describe('queue and execution', () => {
       workDir: 'interface',
       links: [{ name: 'api', stagingRel: api.json.stagingRel, ignore: [] }],
     });
-    const bad = await call(ctx, alice.token, 'POST', `/v1/workspaces/${ws.json.id}/snapshots`, { id: snapshotId, digest: snap.digest, workDir: '../x' });
+    const bad = await call(ctx, alice.token, 'POST', `/v1/workspaces/${ws.json.id}/snapshots`, {
+      id: snapshotId,
+      digest: snap.digest,
+      workDir: '../x',
+    });
     expect(bad.status).toBe(400);
     const registered = await call(ctx, alice.token, 'POST', `/v1/workspaces/${ws.json.id}/snapshots`, {
       id: snapshotId,
@@ -270,7 +279,11 @@ describe('queue and execution', () => {
 
     // The digest covers the linked tree too: a change there after the register fails the next job.
     await writeFile(path.join(ctx.dataDir, snap.relPath, 'api', 'client', 'Package.swift'), 'changed\n');
-    const again = await call(ctx, alice.token, 'POST', '/v1/jobs', { workspaceId: ws.json.id, snapshotId, command: 'true' });
+    const again = await call(ctx, alice.token, 'POST', '/v1/jobs', {
+      workspaceId: ws.json.id,
+      snapshotId,
+      command: 'true',
+    });
     expect(again.status).toBe(201);
     const failed = await waitJob(ctx, alice.token, again.json.job.id);
     expect(failed).toMatchObject({ state: 'failed', error: 'snapshot digest mismatch' });
@@ -355,7 +368,9 @@ describe('queue and execution', () => {
     const cleanup = ctx.app.get(CleanupService);
     await cleanup.runOnce();
     expect(await readFile(path.join(ctx.dataDir, 'cache', 'warm.txt'), 'utf8')).toBe('keep');
-    await expect(readFile(path.join(ctx.dataDir, 'artifacts', 'job_aaaaaaaaaaaaaaaaaaaaaaaa', 'x.txt'), 'utf8')).rejects.toThrow();
+    await expect(
+      readFile(path.join(ctx.dataDir, 'artifacts', 'job_aaaaaaaaaaaaaaaaaaaaaaaa', 'x.txt'), 'utf8'),
+    ).rejects.toThrow();
   });
 
   it('routes a job only to a worker whose labels satisfy the profile', async () => {
@@ -425,8 +440,13 @@ describe('queue and execution', () => {
     await ctx.daemon?.startProcessing();
     expect((await waitJob(ctx, alice.token, id)).state).toBe('succeeded');
     const logs = await call(ctx, alice.token, 'GET', `/v1/jobs/${id}/logs`);
-    const lines = (logs.json.lines as { stream: string; line: string }[]).map((entry) => `${entry.stream}: ${entry.line}`);
-    expect(lines.slice(0, 2)).toEqual(['stderr: source: /Users/ana/code/app TGN-811@3edf65d (dirty)', 'stderr: mise install']);
+    const lines = (logs.json.lines as { stream: string; line: string }[]).map(
+      (entry) => `${entry.stream}: ${entry.line}`,
+    );
+    expect(lines.slice(0, 2)).toEqual([
+      'stderr: source: /Users/ana/code/app TGN-811@3edf65d (dirty)',
+      'stderr: mise install',
+    ]);
   });
 
   it('fails the job without running the command when mise install fails', async () => {
@@ -570,7 +590,10 @@ describe('auth and ownership', () => {
     ];
     for (const [method, route] of routes) {
       // Read only the status: an open event stream never ends.
-      const response = await fetch(`${ctx.base}${route}`, { method, headers: { authorization: `Bearer ${bob.token}` } });
+      const response = await fetch(`${ctx.base}${route}`, {
+        method,
+        headers: { authorization: `Bearer ${bob.token}` },
+      });
       await response.body?.cancel();
       expect(response.status, `${method} ${route}`).toBe(404);
     }
@@ -589,12 +612,23 @@ describe('auth and ownership', () => {
     const bob = await user(ctx, 'bob');
     const aliceWs = await call(ctx, alice.token, 'POST', '/v1/workspaces', { project: 'demo' });
     const snapshotId = createId('snap');
-    await call(ctx, alice.token, 'POST', `/v1/workspaces/${aliceWs.json.id}/snapshots`, { id: snapshotId, digest: fakeDigest });
+    await call(ctx, alice.token, 'POST', `/v1/workspaces/${aliceWs.json.id}/snapshots`, {
+      id: snapshotId,
+      digest: fakeDigest,
+    });
     const bobWs = await call(ctx, bob.token, 'POST', '/v1/workspaces', { project: 'demo' });
-    const stolen = await call(ctx, bob.token, 'POST', '/v1/jobs', { workspaceId: bobWs.json.id, snapshotId, command: 'true' });
+    const stolen = await call(ctx, bob.token, 'POST', '/v1/jobs', {
+      workspaceId: bobWs.json.id,
+      snapshotId,
+      command: 'true',
+    });
     expect(stolen.status).toBe(404);
     // Alice gets past the snapshot check and stops at "no worker".
-    const own = await call(ctx, alice.token, 'POST', '/v1/jobs', { workspaceId: aliceWs.json.id, snapshotId, command: 'true' });
+    const own = await call(ctx, alice.token, 'POST', '/v1/jobs', {
+      workspaceId: aliceWs.json.id,
+      snapshotId,
+      command: 'true',
+    });
     expect(own.status).toBe(503);
   });
 
@@ -650,7 +684,10 @@ describe('auth and ownership', () => {
     const alice = await user(ctx, 'alice');
     const ws = await call(ctx, alice.token, 'POST', '/v1/workspaces', { project: 'demo' });
     const snapshotId = createId('snap');
-    await call(ctx, alice.token, 'POST', `/v1/workspaces/${ws.json.id}/snapshots`, { id: snapshotId, digest: fakeDigest });
+    await call(ctx, alice.token, 'POST', `/v1/workspaces/${ws.json.id}/snapshots`, {
+      id: snapshotId,
+      digest: fakeDigest,
+    });
     const body = { workspaceId: ws.json.id, snapshotId, command: 'true', idempotencyKey: 'key-12345678' };
     const first = await call(ctx, alice.token, 'POST', '/v1/jobs', body);
     const second = await call(ctx, alice.token, 'POST', '/v1/jobs', body);

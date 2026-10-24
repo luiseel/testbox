@@ -12,9 +12,12 @@ export class CleanupService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
-    this.timer = setInterval(() => {
-      void this.runOnce().catch(() => undefined);
-    }, 60 * 60 * 1000);
+    this.timer = setInterval(
+      () => {
+        void this.runOnce().catch(() => undefined);
+      },
+      60 * 60 * 1000,
+    );
     this.timer.unref();
   }
 

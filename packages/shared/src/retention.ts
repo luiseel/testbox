@@ -9,12 +9,7 @@ export function retentionFile(dataDir: string, kind: RetentionKind, id: string):
   return path.join(dataDir, 'retention', `${kind}__${id}.json`);
 }
 
-export async function writeRetention(
-  dataDir: string,
-  kind: RetentionKind,
-  id: string,
-  until: number,
-): Promise<void> {
+export async function writeRetention(dataDir: string, kind: RetentionKind, id: string, until: number): Promise<void> {
   if (!/^[A-Za-z0-9._-]+$/.test(id)) throw new Error('unsafe retention id');
   const file = retentionFile(dataDir, kind, id);
   await mkdir(path.dirname(file), { recursive: true });
@@ -25,10 +20,7 @@ export async function writeRetention(
  * Deletes expired snapshots, logs, and artifacts.
  * Directories under `cache/` and `workspaces/` are never removed.
  */
-export async function cleanupExpired(
-  dataDir: string,
-  now: number,
-): Promise<{ removed: string[] }> {
+export async function cleanupExpired(dataDir: string, now: number): Promise<{ removed: string[] }> {
   const index = path.join(dataDir, 'retention');
   let names: string[] = [];
   try {

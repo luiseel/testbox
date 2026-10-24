@@ -42,21 +42,29 @@ describe('testbox init', () => {
       await writeFile(path.join(repo, 'client', 'swift-client', 'Package.swift'), '');
       await mkdir(path.join(repo, 'ios', 'App.xcodeproj'), { recursive: true });
       await mkdir(path.join(repo, 'node_modules', 'dep'), { recursive: true });
-      await writeFile(path.join(repo, 'node_modules', 'dep', 'package.json'), JSON.stringify({ scripts: { test: 'x' } }));
+      await writeFile(
+        path.join(repo, 'node_modules', 'dep', 'package.json'),
+        JSON.stringify({ scripts: { test: 'x' } }),
+      );
 
       expect(await runCli(['init'], io(repo, repo, noRemote, fetch, out))).toBe(0);
       const config = parseTestboxConfig(await readFile(path.join(repo, 'testbox.yml'), 'utf8'));
       expect(config.project).toBe(path.basename(repo));
       expect(Object.keys(config.profiles).sort()).toEqual(['backend', 'ios', 'swift-client', 'test']);
       expect(config.profiles.test).toMatchObject({ cmd: 'pnpm test', requires: ['mise'] });
-      expect(config.profiles.backend).toMatchObject({ cmd: 'cd backend && ./gradlew --no-daemon test', requires: ['mise'] });
+      expect(config.profiles.backend).toMatchObject({
+        cmd: 'cd backend && ./gradlew --no-daemon test',
+        requires: ['mise'],
+      });
       expect(config.profiles['swift-client']).toMatchObject({
         cmd: 'cd client/swift-client && swift test --build-system native',
         requires: ['macos'],
       });
       expect(config.profiles.ios).toMatchObject({ requires: ['macos', 'xcode', 'ios-simulator'] });
       expect(config.profiles.ios?.cmd).toContain('-project App.xcodeproj -scheme App');
-      expect(config.ignore).toEqual(expect.arrayContaining(['.git', 'backend/.gradle', 'backend/build', 'client/swift-client/.build']));
+      expect(config.ignore).toEqual(
+        expect.arrayContaining(['.git', 'backend/.gradle', 'backend/build', 'client/swift-client/.build']),
+      );
 
       expect(await runCli(['init'], io(repo, repo, noRemote, fetch, out))).toBe(1);
       expect(out.join('')).toContain('pass --force');
@@ -75,7 +83,10 @@ describe('testbox doctor', () => {
     await writeFile(path.join(home, '.ssh', 'id_ed25519.pub'), 'ssh-ed25519 AAAAkey me@laptop\n');
     const repo = path.join(home, 'demo');
     await mkdir(repo);
-    await writeFile(path.join(repo, 'testbox.yml'), 'project: demo\nprofiles:\n  ios:\n    cmd: xcodebuild test\n    requires: [xcode]\n    links: [api, web]\n  unit:\n    cmd: make\n');
+    await writeFile(
+      path.join(repo, 'testbox.yml'),
+      'project: demo\nprofiles:\n  ios:\n    cmd: xcodebuild test\n    requires: [xcode]\n    links: [api, web]\n  unit:\n    cmd: make\n',
+    );
     await mkdir(path.join(home, 'api'));
     await writeFile(path.join(home, 'api', 'testbox.yml'), 'project: api\n');
     const remote: RemoteRunner = {
@@ -113,7 +124,9 @@ describe('testbox doctor', () => {
       expect(text).toContain('only mac-1 can run it, and it is down');
       expect(text).toContain('✓ profile unit');
       expect(text).toContain(`✓ link api of ios: ${path.join(home, 'api')}`);
-      expect(text).toContain('✗ link web of ios: no checkout at ../web\n    fix: pass --link web=<path>, or clone it next to this checkout');
+      expect(text).toContain(
+        '✗ link web of ios: no checkout at ../web\n    fix: pass --link web=<path>, or clone it next to this checkout',
+      );
 
       // Two links to one checkout (here through a symlink): verify rejects it, so doctor must say so.
       await symlink(path.join(home, 'api'), path.join(home, 'web'));
@@ -138,7 +151,12 @@ describe('testbox admin authorize', () => {
         const input = opts?.input ?? '';
         inputs.push(input);
         if (input.includes('Print the control-plane secrets')) {
-          return { code: 0, stdout: 'TESTBOX_RESULT {"workerToken":"w","bootstrapToken":"boot","redisPassword":"","apiPort":"3000","redisPort":"6379"}\n', stderr: '' };
+          return {
+            code: 0,
+            stdout:
+              'TESTBOX_RESULT {"workerToken":"w","bootstrapToken":"boot","redisPassword":"","apiPort":"3000","redisPort":"6379"}\n',
+            stderr: '',
+          };
         }
         return { code: 0, stdout: 'TESTBOX_RESULT {"added":true}\n', stderr: '' };
       },
@@ -148,11 +166,19 @@ describe('testbox admin authorize', () => {
         status: 200,
       })) as typeof fetch;
     await writeAdminConfig(home, {
-      controlPlane: { sshHost: 'me@10.0.0.5', address: '10.0.0.5', apiPort: 3000, redisPort: 6379, repoDir: '~/testbox/app' },
+      controlPlane: {
+        sshHost: 'me@10.0.0.5',
+        address: '10.0.0.5',
+        apiPort: 3000,
+        redisPort: 6379,
+        repoDir: '~/testbox/app',
+      },
     });
     try {
       expect(await runCli(['admin', 'authorize', 'rm -rf /'], io(home, home, remote, fetchImpl, out))).toBe(2);
-      expect(await runCli(['admin', 'authorize', 'ssh-ed25519 AAAAkey ana@laptop'], io(home, home, remote, fetchImpl, out))).toBe(0);
+      expect(
+        await runCli(['admin', 'authorize', 'ssh-ed25519 AAAAkey ana@laptop'], io(home, home, remote, fetchImpl, out)),
+      ).toBe(0);
       expect(inputs.at(-1)).toContain("export TB_PUBLIC_KEY='ssh-ed25519 AAAAkey ana@laptop'");
       expect(out.join('')).toContain('a-1: key added');
     } finally {

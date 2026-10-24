@@ -180,7 +180,10 @@ export async function createSnapshot(opts: {
       await execFileAsync('rsync', args);
     }
   };
-  const locked = lockPaths.reduceRight<() => Promise<void>>((inner, lockPath) => () => withExclusiveLock(lockPath, inner), copy);
+  const locked = lockPaths.reduceRight<() => Promise<void>>(
+    (inner, lockPath) => () => withExclusiveLock(lockPath, inner),
+    copy,
+  );
   await locked();
   const digest = await directoryDigest(dest);
   const until = (opts.now ?? Date.now()) + opts.retentionMs;

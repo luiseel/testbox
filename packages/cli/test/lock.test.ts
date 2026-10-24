@@ -57,7 +57,9 @@ describe('snapshot locks', () => {
 
       const first = holder([api]);
       await first.inside;
-      await expect(withSnapshotLocks([alias], async () => 'never', { waitSeconds: 1 })).rejects.toThrow('another testbox run holds');
+      await expect(withSnapshotLocks([alias], async () => 'never', { waitSeconds: 1 })).rejects.toThrow(
+        'another testbox run holds',
+      );
       first.release();
       await first.done;
 

@@ -66,7 +66,11 @@ export function workerRedisUrl(address: string, port: number | string, password:
 
 /** A user name the API accepts (`^[a-z][a-z0-9-]{1,40}$`), from the local account name. */
 export function defaultUserName(raw = os.userInfo().username): string {
-  const cleaned = raw.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^[^a-z]+/, '').slice(0, 41);
+  const cleaned = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^[^a-z]+/, '')
+    .slice(0, 41);
   return cleaned.length >= 2 ? cleaned : 'admin-user';
 }
 
@@ -88,10 +92,16 @@ export class AdminApp {
     const output = this.out();
     try {
       const address = flags.address ?? ipFromSshHost(sshHost);
-      if (!address) throw new UsageError(`pass --address <LAN IP of ${sshHost}>; workers and VPNs need an IP, not a .local name`);
+      if (!address)
+        throw new UsageError(`pass --address <LAN IP of ${sshHost}>; workers and VPNs need an IP, not a .local name`);
       const repoDir = flags.repoDir ?? DEFAULT_REPO_DIR;
       output.info(`setting up the control plane on ${sshHost}`);
-      const result = await runBootstrap<{ apiPort: number; redisPort: number; repoDir: string; redisPasswordAdded: boolean }>({
+      const result = await runBootstrap<{
+        apiPort: number;
+        redisPort: number;
+        repoDir: string;
+        redisPasswordAdded: boolean;
+      }>({
         runner: this.io.remote,
         sshHost,
         script: 'control-plane',
@@ -107,7 +117,10 @@ export class AdminApp {
       });
       const apiUrl = `http://${address}:${result.apiPort}`;
       if (!(await this.waitHealthy(apiUrl))) {
-        output.failure(`the API runs on ${sshHost}, but this machine cannot reach ${apiUrl}. Check the firewall on ${sshHost}.`, ExitCode.NoWorker);
+        output.failure(
+          `the API runs on ${sshHost}, but this machine cannot reach ${apiUrl}. Check the firewall on ${sshHost}.`,
+          ExitCode.NoWorker,
+        );
         return ExitCode.NoWorker;
       }
       const admin: AdminConfig = {
@@ -133,7 +146,9 @@ export class AdminApp {
         output.info(`logged in as ${name}`);
       }
       if (result.redisPasswordAdded) {
-        output.info('Redis now has a password. Run `testbox admin add-worker <ssh-host>` again for each existing worker.');
+        output.info(
+          'Redis now has a password. Run `testbox admin add-worker <ssh-host>` again for each existing worker.',
+        );
       }
       output.info('next: testbox admin add-worker <user@worker-ip>');
       output.summary({ ok: true, exitCode: 0, exit: 0 });
@@ -166,7 +181,8 @@ export class AdminApp {
     try {
       const plane = await this.controlPlane();
       const address = flags.address ?? ipFromSshHost(sshHost);
-      if (!address) throw new UsageError(`pass --address <LAN IP of ${sshHost}>; developers sync to the worker at this address`);
+      if (!address)
+        throw new UsageError(`pass --address <LAN IP of ${sshHost}>; developers sync to the worker at this address`);
       const secrets = await this.secrets();
       output.info(`setting up the worker on ${sshHost}`);
       const result = await runBootstrap<WorkerResult>({
@@ -269,10 +285,13 @@ export class AdminApp {
         }
       }
       if (failed > 0) {
-        output.failure(`${failed} of ${workers.length} workers did not come back; run testbox admin add-worker for them`, ExitCode.JobFailed);
+        output.failure(
+          `${failed} of ${workers.length} workers did not come back; run testbox admin add-worker for them`,
+          ExitCode.JobFailed,
+        );
         return ExitCode.JobFailed;
       }
-      output.info(`updated ${workers.length} worker${workers.length === 1 ? "" : "s"}`);
+      output.info(`updated ${workers.length} worker${workers.length === 1 ? '' : 's'}`);
       output.summary({ ok: true, exitCode: 0, exit: 0 });
       return ExitCode.Pass;
     } catch (err) {
@@ -306,7 +325,10 @@ export class AdminApp {
         }
       }
       if (failed > 0) {
-        output.failure(`${failed} of ${workers.length} workers did not get the key; fix SSH to them, then run this again`, ExitCode.JobFailed);
+        output.failure(
+          `${failed} of ${workers.length} workers did not get the key; fix SSH to them, then run this again`,
+          ExitCode.JobFailed,
+        );
         return ExitCode.JobFailed;
       }
       output.summary({ ok: true, exitCode: 0, exit: 0 });
@@ -413,7 +435,10 @@ export class AdminApp {
         output.failure(`the test job failed (exit ${code}):\n${lines.join('').trim()}`, code);
         return code;
       }
-      const ok = lines.join('').split('\n').find((line) => line.startsWith('testbox ok on'));
+      const ok = lines
+        .join('')
+        .split('\n')
+        .find((line) => line.startsWith('testbox ok on'));
       output.info(ok ?? 'test job passed');
       return ExitCode.Pass;
     } finally {
@@ -442,7 +467,8 @@ export class AdminApp {
   private async gitUrl(): Promise<string> {
     const result = await this.io.remote.run('git', ['-C', repoRoot(), 'remote', 'get-url', 'origin']);
     const url = result.stdout.trim();
-    if (result.code !== 0 || !url) throw new BootstrapError('cannot read the git remote of this checkout; pass --git-url');
+    if (result.code !== 0 || !url)
+      throw new BootstrapError('cannot read the git remote of this checkout; pass --git-url');
     return url;
   }
 

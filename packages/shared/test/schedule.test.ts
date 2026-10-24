@@ -62,7 +62,9 @@ describe('scheduler', () => {
 
     const busy = worker({ id: 'busy', labels: ['linux'], active: 1, capacity: 2 });
     const idle = worker({ id: 'idle', labels: ['linux'], active: 0 });
-    expect(workerCanRun(worker({ id: 'stale', labels: ['linux'], lastSeen: now - ttl - 1 }), unit, now, ttl)).toBe(false);
+    expect(workerCanRun(worker({ id: 'stale', labels: ['linux'], lastSeen: now - ttl - 1 }), unit, now, ttl)).toBe(
+      false,
+    );
     expect(workerCanRun(idle, { ...unit, targetWorkerId: 'busy' }, now, ttl)).toBe(false);
     expect(workerCanRun(busy, { ...unit, targetWorkerId: 'busy' }, now, ttl)).toBe(true);
   });
@@ -108,7 +110,16 @@ describe('scheduler', () => {
 
   it('counts active and pinned queued jobs, keeps the last job time, and gives a capacity of 0 one slot', () => {
     const records: WorkerRecord[] = [
-      { id: 'w1', hostname: 'h1', os: 'linux', arch: 'x64', labels: ['linux'], capacity: 3, lastSeen: now, sshHost: 'testbox@h1' },
+      {
+        id: 'w1',
+        hostname: 'h1',
+        os: 'linux',
+        arch: 'x64',
+        labels: ['linux'],
+        capacity: 3,
+        lastSeen: now,
+        sshHost: 'testbox@h1',
+      },
       { id: 'w2', hostname: 'h2', os: 'linux', arch: 'x64', labels: [], capacity: 0, lastSeen: now - 5, sshHost: null },
     ];
     const jobs = [
@@ -120,7 +131,16 @@ describe('scheduler', () => {
       { workerId: 'w2', state: 'cancelled' },
     ] as JobRecord[];
     expect(toPlacementWorkers(records, jobs)).toEqual([
-      { id: 'w1', labels: ['linux'], capacity: 3, lastSeen: now, active: 2, waiting: 1, lastJobAt: 40, sshHost: 'testbox@h1' },
+      {
+        id: 'w1',
+        labels: ['linux'],
+        capacity: 3,
+        lastSeen: now,
+        active: 2,
+        waiting: 1,
+        lastJobAt: 40,
+        sshHost: 'testbox@h1',
+      },
       { id: 'w2', labels: [], capacity: 1, lastSeen: now - 5, active: 0, waiting: 0, lastJobAt: 0, sshHost: null },
     ]);
   });

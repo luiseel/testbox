@@ -253,7 +253,9 @@ export class TestboxApp {
     const previousNames = previous ? workspaceSessionNames(previous) : [];
     const allSessions = await mutagen.list();
     // A session of ours is alive only when it still syncs this checkout.
-    const live = new Set(allSessions.filter((session) => session.alphaPath === configDir).map((session) => session.name));
+    const live = new Set(
+      allSessions.filter((session) => session.alphaPath === configDir).map((session) => session.name),
+    );
     let id = checkoutId(configDir);
     let stagingRel = `workspaces/local/${project}/${id}`;
     let workerId: string | undefined;
@@ -270,7 +272,10 @@ export class TestboxApp {
         reused = previous;
       } else {
         // The workspace is gone on the API, or it still has the old shared folder: its sessions are stale.
-        await terminateAll(mutagen, previousNames.filter((old) => live.has(old)));
+        await terminateAll(
+          mutagen,
+          previousNames.filter((old) => live.has(old)),
+        );
         live.clear();
         if (existing) {
           await api.deleteWorkspace(existing.id);
@@ -307,7 +312,9 @@ export class TestboxApp {
     }
     if (workerId) sessions[workerId] = { sessionName: name, sshHost };
     for (const root of otherRootsSyncingTo(allSessions, stagingRel, configDir)) {
-      output.error(`warning: ${root} also syncs to this worker folder; run testbox stop there, then testbox start here`);
+      output.error(
+        `warning: ${root} also syncs to this worker folder; run testbox stop there, then testbox start here`,
+      );
     }
     const state: WorkspaceState = {
       id,
@@ -326,7 +333,10 @@ export class TestboxApp {
     if (!keep) {
       const kept = new Set(Object.values(sessions).map((session) => session.sessionName));
       kept.delete(name);
-      await terminateAll(mutagen, previousNames.filter((old) => live.has(old) && !kept.has(old)));
+      await terminateAll(
+        mutagen,
+        previousNames.filter((old) => live.has(old) && !kept.has(old)),
+      );
       const ssh = this.ssh(sshHost, user?.identityFile);
       await ssh.ensureStaging(remoteRoot, stagingRel);
       await ssh.create({
@@ -391,7 +401,9 @@ export class TestboxApp {
     const profile = loaded.config.profiles[profileName];
     if (!profile) {
       const names = Object.keys(loaded.config.profiles);
-      const known = names.length ? `the profiles in ${loaded.file} are: ${names.join(', ')}` : `${loaded.file} has no profiles`;
+      const known = names.length
+        ? `the profiles in ${loaded.file} are: ${names.join(', ')}`
+        : `${loaded.file} has no profiles`;
       return this.fail(output, new UsageError(`unknown profile ${profileName}; ${known}`));
     }
     return profile;
@@ -404,7 +416,14 @@ export class TestboxApp {
       if (!user) return ExitCode.Auth;
       const { job } = await this.api(user).getJob(jobId);
       const exit = exitCodeForJob(job.state);
-      output.summary({ jobId: job.id, state: job.state, exitCode: job.exitCode, error: job.error, source: job.source ?? undefined, exit });
+      output.summary({
+        jobId: job.id,
+        state: job.state,
+        exitCode: job.exitCode,
+        error: job.error,
+        source: job.source ?? undefined,
+        exit,
+      });
       if (!this.json && job.source) output.info(formatJobSource(job.source));
       return exit;
     } catch (err) {
@@ -482,7 +501,8 @@ export class TestboxApp {
       const configDir = path.dirname(loaded.file);
       const overrides = parseLinkFlags(flags.link, this.io.cwd);
       const linkNames = jobLinkNames(loaded.config.project, profileName, profile, overrides);
-      if (flags.direct && linkNames.length > 0) throw new UsageError('links need the control plane; run without --direct');
+      if (flags.direct && linkNames.length > 0)
+        throw new UsageError('links need the control plane; run without --direct');
       // Find every linked checkout before any network call: a missing one is a mistake in the call.
       const links = await resolveLinks(configDir, loaded.config.project, linkNames, overrides);
       const user = await this.requireUser(flags.direct === true);
@@ -528,7 +548,8 @@ export class TestboxApp {
     const source = await collectSource(this.io.remote, configDir);
     if (links.length > 0) {
       source.links = [];
-      for (const link of links) source.links.push({ name: link.name, ...(await collectSource(this.io.remote, link.dir)) });
+      for (const link of links)
+        source.links.push({ name: link.name, ...(await collectSource(this.io.remote, link.dir)) });
     }
     if (this.json) output.event({ type: 'source', ...source });
     else output.info(formatJobSource(source));
@@ -551,14 +572,31 @@ export class TestboxApp {
         }
       }
       // The main tree first, then each link. Each tree is a checkout with its own workspace and session.
-      const trees: SyncedTree[] = [{ name: loaded.config.project, dir: configDir, ignore: loaded.config.ignore, state }];
+      const trees: SyncedTree[] = [
+        { name: loaded.config.project, dir: configDir, ignore: loaded.config.ignore, state },
+      ];
       for (const link of links) {
         // --workspace names the workspace of the main checkout, not of a link.
-        let linkState = await this.resolveState(link.loaded, { ...flags, workspace: undefined }, user, output, requires, worker);
+        let linkState = await this.resolveState(
+          link.loaded,
+          { ...flags, workspace: undefined },
+          user,
+          output,
+          requires,
+          worker,
+        );
         if (worker) {
-          linkState = await this.ensureWorkerSession(linkState, worker, link.dir, link.loaded.config.ignore, user?.identityFile);
+          linkState = await this.ensureWorkerSession(
+            linkState,
+            worker,
+            link.dir,
+            link.loaded.config.ignore,
+            user?.identityFile,
+          );
         } else if (linkState.sshHost !== state.sshHost) {
-          throw new RemoteUnavailable(`link ${link.name} syncs to ${linkState.sshHost}, not to ${state.sshHost}; start a worker, then run again`);
+          throw new RemoteUnavailable(
+            `link ${link.name} syncs to ${linkState.sshHost}, not to ${state.sshHost}; start a worker, then run again`,
+          );
         }
         trees.push({ name: link.name, dir: link.dir, ignore: link.loaded.config.ignore, state: linkState });
       }
@@ -681,12 +719,24 @@ export class TestboxApp {
         if (installed.stdout) log.write(installed.stdout);
         if (installed.stderr) log.write(installed.stderr);
         if (installed.timedOut) {
-          output.summary({ state: 'timed_out', exitCode: null, error: 'timeout during dependency install', exit: ExitCode.Timeout, logFile: log.path });
+          output.summary({
+            state: 'timed_out',
+            exitCode: null,
+            error: 'timeout during dependency install',
+            exit: ExitCode.Timeout,
+            logFile: log.path,
+          });
           return ExitCode.Timeout;
         }
         if (installed.code !== 0) {
           output.line('stderr', installed.stderr.replace(/\n$/, '') || 'dependency install failed');
-          output.summary({ state: 'failed', exitCode: installed.code, error: 'dependency install failed', exit: ExitCode.JobFailed, logFile: log.path });
+          output.summary({
+            state: 'failed',
+            exitCode: installed.code,
+            error: 'dependency install failed',
+            exit: ExitCode.JobFailed,
+            logFile: log.path,
+          });
           return ExitCode.JobFailed;
         }
       }
@@ -694,17 +744,31 @@ export class TestboxApp {
       await writeFile(stampPath, JSON.stringify(fingerprint));
     }
     const result = await ssh.execIn(state.remoteRoot, state.stagingRel, command, timeoutMs);
-    for (const [stream, text] of [['stdout', result.stdout], ['stderr', result.stderr]] as const) {
+    for (const [stream, text] of [
+      ['stdout', result.stdout],
+      ['stderr', result.stderr],
+    ] as const) {
       if (!text) continue;
       output.line(stream, text.replace(/\n$/, ''));
       log.write(text);
     }
     if (result.timedOut) {
-      output.summary({ state: 'timed_out', exitCode: null, error: 'timeout', exit: ExitCode.Timeout, logFile: log.path });
+      output.summary({
+        state: 'timed_out',
+        exitCode: null,
+        error: 'timeout',
+        exit: ExitCode.Timeout,
+        logFile: log.path,
+      });
       return ExitCode.Timeout;
     }
     const code = result.code === 0 ? ExitCode.Pass : ExitCode.JobFailed;
-    output.summary({ state: code === 0 ? 'succeeded' : 'failed', exitCode: result.code, exit: code, logFile: log.path });
+    output.summary({
+      state: code === 0 ? 'succeeded' : 'failed',
+      exitCode: result.code,
+      exit: code,
+      logFile: log.path,
+    });
     return code;
   }
 
@@ -921,7 +985,8 @@ export class TestboxApp {
 
   private timeoutMs(flags: CommonFlags): number {
     const seconds = flags.timeout ? Number(flags.timeout) : 30 * 60;
-    if (!Number.isFinite(seconds) || seconds <= 0) throw new UsageError('invalid --timeout: pass a number of seconds above 0');
+    if (!Number.isFinite(seconds) || seconds <= 0)
+      throw new UsageError('invalid --timeout: pass a number of seconds above 0');
     return Math.round(seconds * 1000);
   }
 
@@ -945,7 +1010,12 @@ export function exitCodeForFailure(err: unknown): number {
  * The links of a job. verify: the links of the profile; `--link` only changes where one is.
  * run: the names given with `--link`.
  */
-function jobLinkNames(project: string, profileName: string | null, profile: ProfileConfig | null, overrides: Map<string, string>): string[] {
+function jobLinkNames(
+  project: string,
+  profileName: string | null,
+  profile: ProfileConfig | null,
+  overrides: Map<string, string>,
+): string[] {
   if (!profile) {
     // The same rules as `links` in testbox.yml: the main tree is the folder <project>, and the API caps the count.
     // Case does not count: a Mac worker's disk can be case-insensitive, so App and app are one folder.
