@@ -84,7 +84,7 @@ describe('testbox doctor', () => {
       }) as typeof fetch;
     const fixFor = async (fetchImpl: typeof fetch) => {
       const out: string[] = [];
-      expect(await runCli(['doctor'], io(home, home, noRemote, fetchImpl, out))).toBe(11);
+      expect(await runCli(['doctor'], io(home, home, noRemote, fetchImpl, out))).toBe(21);
       const text = out.join('');
       expect(text).toContain('✗ API at http://10.0.0.5:3000');
       return text;
@@ -99,7 +99,7 @@ describe('testbox doctor', () => {
 
       // No answer at all: the network, or a stopped host. Say both.
       const unreachable = await fixFor(failing('ETIMEDOUT'));
-      expect(unreachable).toContain('no answer from 10.0.0.5:3000 (ETIMEDOUT)');
+      expect(unreachable).toContain('no answer from http://10.0.0.5:3000 (ETIMEDOUT)');
       expect(unreachable).toContain('Turn on your VPN');
       expect(unreachable).toContain('cd ~/testbox/app && docker compose up -d');
 

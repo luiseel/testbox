@@ -33,7 +33,7 @@ Flags for `verify` and `run`: `--detach` (submit and return the job id), `--time
 | `admin add-user <name>` | Makes the user if needed, prints a `testbox setup` line with a new token. |
 | `admin authorize '<public key>'` | Adds an SSH public key to every worker. |
 
-Admin exit codes: 2 when the address is missing (pass `--address <LAN IP>`) or the public key is not one SSH public key line; 11 when the API does not answer after `init-control-plane` or `upgrade`, or a new worker sends no heartbeat; 1 when a worker fails in `upgrade` or `authorize`; when the test job of `add-worker` fails, admin exits with the status of that `verify` (1 for a failed job, 10 when the sync fails), not the `exitCode` of the command on the worker. With `--json`, each admin command ends with a `summary`, as every command does.
+Admin exit codes: 2 when the address is missing (pass `--address <LAN IP>`) or the public key is not one SSH public key line; 21 when the API does not answer after `init-control-plane` or `upgrade`; 11 when a new worker sends no heartbeat; 1 when a worker fails in `upgrade` or `authorize`; when the test job of `add-worker` fails, admin exits with the status of that `verify` (1 for a failed job, 10 when the sync fails), not the `exitCode` of the command on the worker. With `--json`, each admin command ends with a `summary`, as every command does.
 
 ## Exit codes
 
@@ -41,12 +41,13 @@ Admin exit codes: 2 when the address is missing (pass `--address <LAN IP>`) or t
 | --- | --- |
 | 0 | job passed |
 | 1 | job failed, or another error at run time (for example a failed `doctor` check) |
-| 2 | bad call: unknown profile, missing or invalid `testbox.yml`, unknown flag or missing argument, bad `--timeout`, a link with no checkout or no `testbox.yml`, a `--link` the profile does not have, a bad or repeated `--link`, two links to one checkout or a link that is this checkout, `--direct` with links, an `admin` command without an address or with a bad public key |
+| 2 | bad call: unknown profile, missing or invalid `testbox.yml`, unknown flag or missing argument, bad `--timeout`, a link with no checkout or no `testbox.yml`, a `--link` the profile does not have, a bad or repeated `--link`, two links to one checkout or a link that is this checkout, `--direct` with links, an `admin` command without an address or with a bad public key, `login` or `setup` with an `--api-url` that is not an http(s) URL |
 | 10 | sync error: Mutagen, the snapshot copy, or the local checkout lock (`flock` is missing, or another run holds `.testbox/snapshot.lock` for over 15 minutes) |
 | 11 | no compatible worker: no worker has the labels, none with the labels sends heartbeats, SSH to the worker fails, or the API answers 503 |
 | 12 | timeout, or the worker stopped during the job (its lease expired) |
 | 13 | cancelled |
 | 20 | auth (the API answers 401 or 403) |
+| 21 | the API does not answer: no route to it, nothing listens, a timeout, or the connection dropped. `doctor` exits 21 too when its API check fails. |
 
 ## Output with --json
 
@@ -64,7 +65,7 @@ Every command accepts `--json`. It writes NDJSON to stdout, one event per line, 
 | `user` | `name`, `apiUrl`, `token` | `admin add-user`. |
 | `summary` | `exit`, `hint`, `exitCode`, `state` (a job state, `error`, or `detached`), `jobId`, `error`, `logFile`, and per command: `ok`, `source` (`status`), `failed` (`doctor`, `prune`), `count` and `dryRun` (`prune`), `file` and `profiles` (`init`) | The last line. |
 
-In the summary, `exit` is the status of the CLI, the same as `$?`, and `exitCode` is the status of the command on the worker (`null` when it did not run). `hint` is present when `exit` is not 0, and on a `detached` summary; it says what to do, in one line. `logFile` is the local copy of the job log next to `testbox.yml`: `.testbox/logs/<job-id>.log`, or `.testbox/logs/run_<id>.log` with `--direct` (no job exists there). `logs --follow` writes it too when it runs inside a repo with `testbox.yml`. A `state` of `error` means the command stopped before a job existed; `error` has the message. A `state` of `detached` (exit 0, `exitCode` `null`) means the CLI stopped following a job that still runs: after `--detach`, SIGTERM, SIGHUP, or "detach" at the Ctrl-C prompt. Its `hint` is `the job continues on the worker: testbox logs <job-id> --follow, or testbox status <job-id>`. After `--detach` there is no `logFile`; `logs --follow` writes it. A log file that cannot be written does not fail the job: an `info` event says why, and the summary has no `logFile`.
+In the summary, `exit` is the status of the CLI, the same as `$?`, and `exitCode` is the status of the command on the worker (`null` when it did not run). `hint` is present when `exit` is not 0, and on a `detached` summary; it says what to do, in one line. `logFile` is the local copy of the job log next to `testbox.yml`: `.testbox/logs/<job-id>.log`, or `.testbox/logs/run_<id>.log` with `--direct` (no job exists there). `logs --follow` writes it too when it runs inside a repo with `testbox.yml`. A `state` of `error` means the command stopped before a job existed; `error` has the message. For exit 21, `error` names the API address and the reason: `cannot reach the API at http://<ip>:3000: ECONNREFUSED`. A `state` of `detached` (exit 0, `exitCode` `null`) means the CLI stopped following a job that still runs: after `--detach`, SIGTERM, SIGHUP, or "detach" at the Ctrl-C prompt. Its `hint` is `the job continues on the worker: testbox logs <job-id> --follow, or testbox status <job-id>`. After `--detach` there is no `logFile`; `logs --follow` writes it. A log file that cannot be written does not fail the job: an `info` event says why, and the summary has no `logFile`.
 
 ## testbox.yml
 

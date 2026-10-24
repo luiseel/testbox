@@ -530,7 +530,7 @@ describe('testbox admin --json: a summary on every path', () => {
     }
   });
 
-  it('exits 11 when the API does not answer or the worker sends no heartbeat', async () => {
+  it('exits 21 when the API does not answer, and 11 when the worker sends no heartbeat', async () => {
     const result =
       'TESTBOX_RESULT {"apiPort":3000,"redisPort":6379,"repoDir":"~/testbox/app","redisPasswordAdded":false}\n';
     const { home, run } = await adminHome(
@@ -542,9 +542,9 @@ describe('testbox admin --json: a summary on every path', () => {
     );
     try {
       const init = await fastClock(() => run(['admin', 'init-control-plane', 'me@10.0.0.5']));
-      expect(init.code).toBe(11);
-      expect(init.summary.error).toContain('cannot reach http://10.0.0.5:3000');
-      expect((await fastClock(() => run(['admin', 'upgrade']))).code).toBe(11);
+      expect(init.code).toBe(21);
+      expect(init.summary.error).toContain('cannot reach http://10.0.0.5:3000 (HTTP 502)');
+      expect((await fastClock(() => run(['admin', 'upgrade']))).code).toBe(21);
       const worker = await fastClock(() => run(['admin', 'add-worker', 'me@10.0.0.7', '--no-smoke']));
       expect(worker.code).toBe(11);
       expect(worker.summary.error).toContain('box-1 sent no heartbeat');

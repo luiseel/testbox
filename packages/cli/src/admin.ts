@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { ExitCode } from '@testbox/shared';
-import { HttpApi } from './api-client';
+import { type ApiHealth, HttpApi } from './api-client';
 import { BootstrapError, ipFromSshHost, repoRoot, runBootstrap } from './bootstrap';
 import { exitCodeForFailure, TestboxApp, UsageError, type CliIO } from './commands';
 import { readAdminConfig, readUserConfig, writeAdminConfig, writeUserConfig, type AdminConfig } from './config-store';
@@ -116,12 +116,13 @@ export class AdminApp {
         onProgress: (line) => output.info(`  ${line}`),
       });
       const apiUrl = `http://${address}:${result.apiPort}`;
-      if (!(await this.waitHealthy(apiUrl))) {
+      const health = await this.waitHealthy(apiUrl);
+      if (!health.ok) {
         output.failure(
-          `the API runs on ${sshHost}, but this machine cannot reach ${apiUrl}. Check the firewall on ${sshHost}.`,
-          ExitCode.NoWorker,
+          `the API runs on ${sshHost}, but this machine cannot reach ${apiUrl} (${health.detail}). Check the firewall on ${sshHost}.`,
+          ExitCode.ApiUnreachable,
         );
-        return ExitCode.NoWorker;
+        return ExitCode.ApiUnreachable;
       }
       const admin: AdminConfig = {
         ...(await readAdminConfig(this.io.homeDir)),
@@ -248,9 +249,10 @@ export class AdminApp {
           },
           onProgress: (line) => output.info(`  ${line}`),
         });
-        if (!(await this.waitHealthy(await this.apiUrl(), 30))) {
-          output.failure('the API did not come back after the update', ExitCode.NoWorker);
-          return ExitCode.NoWorker;
+        const health = await this.waitHealthy(await this.apiUrl(), 30);
+        if (!health.ok) {
+          output.failure(`the API did not come back after the update (${health.detail})`, ExitCode.ApiUnreachable);
+          return ExitCode.ApiUnreachable;
         }
       }
       const api = await this.adminApi();
@@ -455,13 +457,15 @@ export class AdminApp {
     }
   }
 
-  private async waitHealthy(apiUrl: string, attempts = 15): Promise<boolean> {
+  /** Polls the health check once a second. The last result says why the API did not answer. */
+  private async waitHealthy(apiUrl: string, attempts = 15): Promise<ApiHealth> {
     const api = new HttpApi(apiUrl, '', this.io.fetchImpl);
-    for (let i = 0; i < attempts; i++) {
-      if (await api.healthy()) return true;
+    let health = await api.health();
+    for (let i = 1; i < attempts && !health.ok; i++) {
       await new Promise((resolve) => setTimeout(resolve, 1_000));
+      health = await api.health();
     }
-    return false;
+    return health;
   }
 
   private async gitUrl(): Promise<string> {

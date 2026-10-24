@@ -685,17 +685,17 @@ describe('agent-facing cli: the summary contract on every path', () => {
     const stderr: string[] = [];
     try {
       await loggedIn(home);
-      // doctor: the API answers the health check, then fails on an unexpected error.
+      // doctor: the API answers the health check, then the connection drops.
       const broken = (async (input: string | URL | Request) => {
         if (String(input).endsWith('/healthz')) return new Response('{}', { status: 200 });
         throw new Error('socket hang up');
       }) as typeof fetch;
-      expect(await runCli(['doctor', '--json'], io(home, project, quietRemote, stdout, stderr, broken))).toBe(1);
+      expect(await runCli(['doctor', '--json'], io(home, project, quietRemote, stdout, stderr, broken))).toBe(21);
       expect(jsonLines(stdout).at(-1)).toMatchObject({
         type: 'summary',
         state: 'error',
-        error: 'socket hang up',
-        exit: 1,
+        error: 'cannot reach the API at http://api.test: socket hang up',
+        exit: 21,
       });
 
       stdout.length = 0;
@@ -1241,7 +1241,7 @@ describe('agent-facing cli: each failure has its own exit code', () => {
     }
   });
 
-  it('exits 2 for --timeout 0, and 20 when login cannot reach the API', async () => {
+  it('exits 2 for --timeout 0 or a bad --api-url, and 21 when login cannot reach the API', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
     const project = await mkdtemp(path.join(os.tmpdir(), 'tb-proj-'));
     const stdout: string[] = [];
@@ -1259,20 +1259,53 @@ describe('agent-facing cli: each failure has its own exit code', () => {
         throw new TypeError('fetch failed');
       }) as typeof fetch;
       const login = ['login', '--token', 'token-value-123456', '--api-url', 'http://api.test'];
-      expect((await exitAndSummary(login, io(home, project, quietRemote, stdout, [], down), stdout)).code).toBe(20);
+      expect((await exitAndSummary(login, io(home, project, quietRemote, stdout, [], down), stdout)).code).toBe(21);
+      const badUrl = ['login', '--token', 'token-value-123456', '--api-url', '10.0.0.5:3000'];
+      const bad = await exitAndSummary(badUrl, io(home, project, quietRemote, stdout, [], down), stdout);
+      expect(bad.code).toBe(2);
+      expect(bad.summary.error).toContain('--api-url must be an http or https URL');
     } finally {
       await rm(home, { recursive: true, force: true });
       await rm(project, { recursive: true, force: true });
     }
   });
 
-  it('doctor exits 11 when the API is down and 20 for a rejected token; setup stops at a rejected token', async () => {
+  it('verify exits 21 with the API address when the API does not answer, not 1', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
+    const project = await mkdtemp(path.join(os.tmpdir(), 'tb-proj-'));
+    const stdout: string[] = [];
+    try {
+      await loggedIn(home);
+      await writeFile(path.join(project, 'testbox.yml'), 'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n');
+      const refused = (async () => {
+        throw new TypeError('fetch failed', { cause: Object.assign(new Error('refused'), { code: 'ECONNREFUSED' }) });
+      }) as typeof fetch;
+      const { code, summary } = await exitAndSummary(
+        ['verify', 'unit'],
+        io(home, project, quietRemote, stdout, [], refused),
+        stdout,
+      );
+      expect(code).toBe(21);
+      expect(summary).toMatchObject({
+        state: 'error',
+        exitCode: null,
+        error: 'cannot reach the API at http://api.test: ECONNREFUSED',
+      });
+      expect(summary.hint).toContain('testbox doctor');
+      expect(summary.hint).not.toContain('fix the code');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+      await rm(project, { recursive: true, force: true });
+    }
+  });
+
+  it('doctor exits 21 when the API is down and 20 for a rejected token; setup stops at a rejected token', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
     const stdout: string[] = [];
     try {
       await loggedIn(home);
       const down = (async () => new Response('', { status: 502 })) as typeof fetch;
-      expect((await exitAndSummary(['doctor'], io(home, home, quietRemote, stdout, [], down), stdout)).code).toBe(11);
+      expect((await exitAndSummary(['doctor'], io(home, home, quietRemote, stdout, [], down), stdout)).code).toBe(21);
 
       const rejected = (async (input: string | URL | Request) => {
         if (String(input).endsWith('/healthz')) return new Response('{"ok":true}', { status: 200 });

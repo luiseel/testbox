@@ -36,6 +36,7 @@ The worker log is `~/testbox/logs/worker.stderr.log` on a Mac, and `journalctl -
 | `verify` exits 10: `another testbox run holds .testbox/snapshot.lock`. | Another `verify` on this machine snapshots the same checkout (for example a link of both) and took longer than 15 minutes. | Wait for it, or cancel it. |
 | `verify` exits 12 with `lease_expired`. | The worker stopped or lost Redis during the job. | `testbox doctor`, then run the job again. |
 | `verify` exits 20. | Your token is wrong or was replaced. | Ask an admin: `testbox admin add-user <your name>` prints a new `testbox setup` line. |
+| `verify` exits 21: `cannot reach the API at http://<ip>:3000: …`. | The API is not running, or you are not on the LAN. | `testbox doctor`; its `API at` fix line says which. See the `doctor` row above. |
 
 ## Setup commands
 
