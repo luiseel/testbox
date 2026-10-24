@@ -828,7 +828,7 @@ export class TestboxApp {
     ignore: string[],
     identityFile?: string,
   ): Promise<WorkspaceState> {
-    const sessions = { ...(state.sessions ?? {}) };
+    const sessions = { ...state.sessions };
     const existing = sessions[worker.id];
     const ssh = this.ssh(worker.sshHost, identityFile);
     if (existing && existing.sshHost === worker.sshHost) {

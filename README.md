@@ -86,7 +86,7 @@ profiles:
 ```sh
 pnpm install
 pnpm typecheck
-pnpm lint
+pnpm lint        # oxlint and oxfmt --check; pnpm format rewrites the files
 pnpm test        # starts its own Redis on a free port (redis-server, or Docker); needs flock (macOS: brew install flock)
 ```
 

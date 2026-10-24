@@ -8,7 +8,7 @@ Run these from the repo root, in this order. All three must pass before a change
 
 ```sh
 pnpm typecheck   # tsrs -b over every package; also catches a stale import
-pnpm lint        # eslint
+pnpm lint        # oxlint, then oxfmt --check; `pnpm format` rewrites the files
 pnpm test        # bash scripts/test.sh: every package's vitest suite
 ```
 
@@ -17,7 +17,7 @@ pnpm test        # bash scripts/test.sh: every package's vitest suite
 - The tests do not touch the network, a real worker, or Mutagen. They fake `RemoteRunner` and `fetch` (see `packages/cli/test/agent.test.ts` for the shortest example). `packages/worker/test/daemon.test.ts` runs a real daemon against the test Redis.
 - With a testbox login, `testbox verify check` runs all three on a worker (Linux or macOS). `testbox profiles` lists the faster profiles.
 - `pnpm build` is only needed to run the built CLI (`node packages/cli/dist/main.js`) or before `./scripts/install-cli.sh`.
-- `tsrs` is the compiler: a Rust port of TypeScript 7, pinned to one exact version. It has binaries for Apple Silicon and Linux (x64, arm64) only. The root `typescript` package is only there for eslint.
+- `tsrs` is the compiler: a Rust port of TypeScript 7, pinned to one exact version. It has binaries for Apple Silicon and Linux (x64, arm64) only. The linter is `oxlint` and the formatter is `oxfmt`, both from [oxc](https://oxc.rs/), pinned the same way; they have no dependency on `typescript`.
 
 ## Where things are
 
