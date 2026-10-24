@@ -1241,7 +1241,7 @@ describe('agent-facing cli: each failure has its own exit code', () => {
     }
   });
 
-  it('exits 2 for --timeout 0, and 21 when login cannot reach the API', async () => {
+  it('exits 2 for --timeout 0 or a bad --api-url, and 21 when login cannot reach the API', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
     const project = await mkdtemp(path.join(os.tmpdir(), 'tb-proj-'));
     const stdout: string[] = [];
@@ -1260,6 +1260,10 @@ describe('agent-facing cli: each failure has its own exit code', () => {
       }) as typeof fetch;
       const login = ['login', '--token', 'token-value-123456', '--api-url', 'http://api.test'];
       expect((await exitAndSummary(login, io(home, project, quietRemote, stdout, [], down), stdout)).code).toBe(21);
+      const badUrl = ['login', '--token', 'token-value-123456', '--api-url', '10.0.0.5:3000'];
+      const bad = await exitAndSummary(badUrl, io(home, project, quietRemote, stdout, [], down), stdout);
+      expect(bad.code).toBe(2);
+      expect(bad.summary.error).toContain('--api-url must be an http or https URL');
     } finally {
       await rm(home, { recursive: true, force: true });
       await rm(project, { recursive: true, force: true });

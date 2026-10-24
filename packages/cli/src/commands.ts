@@ -21,7 +21,7 @@ import {
   type ProfileConfig,
   type TestboxConfig,
 } from '@testbox/shared';
-import { CliApiError, exitCodeForCliError, HttpApi } from './api-client';
+import { CliApiError, exitCodeForCliError, HttpApi, isAbort, isHttpUrl } from './api-client';
 import {
   readUserConfig,
   readWorkspaceState,
@@ -159,6 +159,13 @@ export class TestboxApp {
 
   async login(token: string, apiUrl: string, sshHost?: string): Promise<number> {
     const output = this.out();
+    if (!isHttpUrl(apiUrl)) {
+      output.failure(
+        `--api-url must be an http or https URL, for example http://192.168.1.10:3000; got ${apiUrl}`,
+        ExitCode.Usage,
+      );
+      return ExitCode.Usage;
+    }
     const previous = await readUserConfig(this.io.homeDir);
     const config: UserConfig = {
       apiUrl: apiUrl.replace(/\/$/, ''),
@@ -1046,10 +1053,6 @@ function otherRootsSyncingTo(sessions: MutagenSessionInfo[], stagingRel: string,
     if (session.betaUrl.endsWith(`/${stagingRel}`)) roots.add(session.alphaPath);
   }
   return [...roots];
-}
-
-function isAbort(err: unknown): boolean {
-  return err instanceof Error && err.name === 'AbortError';
 }
 
 /** The summary when the CLI stops following a job that still runs: say how to find it again. */

@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { buildSshArgs, ExitCode, loadRepoConfig } from '@testbox/shared';
 import { Output } from './output';
-import { type ApiHealth, CliApiError, HttpApi } from './api-client';
+import { type ApiHealth, apiAddress, CliApiError, HttpApi } from './api-client';
 import { exitCodeForFailure, TestboxApp, type CliIO } from './commands';
 import { readUserConfig, type UserConfig } from './config-store';
 import { resolveLink, sameCheckoutAs, type LinkedCheckout } from './links';
@@ -38,7 +38,7 @@ const RESTART_CONTROL_PLANE = 'cd ~/testbox/app && docker compose up -d';
 
 /** What to do when the API does not answer. The reason tells the network problem from a stopped control plane. */
 export function apiDownFix(apiUrl: string, health: Exclude<ApiHealth, { ok: true }>): string {
-  const host = new URL(apiUrl).host;
+  const host = apiAddress(apiUrl);
   switch (health.reason) {
     case 'refused':
       return `${host} is up, but the API is not running (${health.detail}). An admin runs on that host: ${RESTART_CONTROL_PLANE}. When the API is back, run testbox admin upgrade once, so the containers come back after the next reboot`;

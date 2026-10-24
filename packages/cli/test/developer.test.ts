@@ -99,7 +99,7 @@ describe('testbox doctor', () => {
 
       // No answer at all: the network, or a stopped host. Say both.
       const unreachable = await fixFor(failing('ETIMEDOUT'));
-      expect(unreachable).toContain('no answer from 10.0.0.5:3000 (ETIMEDOUT)');
+      expect(unreachable).toContain('no answer from http://10.0.0.5:3000 (ETIMEDOUT)');
       expect(unreachable).toContain('Turn on your VPN');
       expect(unreachable).toContain('cd ~/testbox/app && docker compose up -d');
 

@@ -11,11 +11,35 @@ export class CliApiError extends Error {
   }
 }
 
-/** The API gave no answer: no route, nothing listens, or the request timed out. Not an HTTP error. */
+/** True for an abort by the caller (Ctrl-C, detach): not a failure of the API. */
+export function isAbort(err: unknown): boolean {
+  return err instanceof Error && err.name === 'AbortError';
+}
+
+/** True when `value` is an http or https URL, which is what `--api-url` must be. */
+export function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/** The API address for a message: the origin, or the raw value when it is not a URL. Never throws. */
+export function apiAddress(apiUrl: string): string {
+  try {
+    return new URL(apiUrl).origin;
+  } catch {
+    return apiUrl;
+  }
+}
+
+/** The API gave no answer: no route, nothing listens, the request timed out, or the connection dropped. Not an HTTP error. */
 export class ApiUnreachableError extends Error {
   constructor(apiUrl: string, cause: unknown) {
     const why = errorCode(cause) ?? (cause instanceof Error ? cause.message : String(cause));
-    super(`cannot reach the API at ${new URL(apiUrl).origin}: ${why}`, { cause });
+    super(`cannot reach the API at ${apiAddress(apiUrl)}: ${why}`, { cause });
     this.name = 'ApiUnreachableError';
   }
 }
@@ -56,14 +80,14 @@ export class HttpApi {
   ) {}
 
   /**
-   * fetch, with a network failure turned into ApiUnreachableError so the exit code is 21, not 1.
-   * An abort by the caller (Ctrl-C, detach) is not a network failure and passes through.
+   * Runs one step of the transport (the request, or a read of the body) and turns a network failure into
+   * ApiUnreachableError, so the exit code is 21, not 1. An abort by the caller passes through.
    */
-  private async fetch(url: string, init: RequestInit): Promise<Response> {
+  private async transport<T>(step: () => Promise<T>): Promise<T> {
     try {
-      return await this.fetchImpl(url, init);
+      return await step();
     } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') throw err;
+      if (isAbort(err)) throw err;
       throw new ApiUnreachableError(this.baseUrl, err);
     }
   }
@@ -79,18 +103,20 @@ export class HttpApi {
     headers?: Record<string, string>,
     signal?: AbortSignal,
   ): Promise<T> {
-    const response = await this.fetch(this.url(path), {
-      method,
-      signal,
-      headers: {
-        authorization: `Bearer ${this.token}`,
-        accept: 'application/json',
-        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-        ...headers,
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    const text = await response.text();
+    const response = await this.transport(() =>
+      this.fetchImpl(this.url(path), {
+        method,
+        signal,
+        headers: {
+          authorization: `Bearer ${this.token}`,
+          accept: 'application/json',
+          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+          ...headers,
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      }),
+    );
+    const text = await this.transport(() => response.text());
     let parsed: { error?: { code?: string; message?: string } } = {};
     if (text) {
       try {
@@ -137,9 +163,14 @@ export class HttpApi {
       return { ok: true };
     } catch (err) {
       if (err instanceof CliApiError) return { ok: false, reason: 'unhealthy', detail: `HTTP ${err.status}` };
-      const code = errorCode(err);
+      const root = err instanceof ApiUnreachableError ? err.cause : err;
+      const code = errorCode(root);
       if (code === 'ECONNREFUSED') return { ok: false, reason: 'refused', detail: code };
-      return { ok: false, reason: 'unreachable', detail: code ?? (err instanceof Error ? err.message : String(err)) };
+      return {
+        ok: false,
+        reason: 'unreachable',
+        detail: code ?? (root instanceof Error ? root.message : String(root)),
+      };
     }
   }
 
@@ -222,9 +253,10 @@ export class HttpApi {
   }
 
   async downloadArtifact(id: string, relPath: string): Promise<Uint8Array> {
-    const response = await this.fetch(
-      this.url(`/v1/jobs/${id}/artifacts/content?path=${encodeURIComponent(relPath)}`),
-      { headers: { authorization: `Bearer ${this.token}` } },
+    const response = await this.transport(() =>
+      this.fetchImpl(this.url(`/v1/jobs/${id}/artifacts/content?path=${encodeURIComponent(relPath)}`), {
+        headers: { authorization: `Bearer ${this.token}` },
+      }),
     );
     if (!response.ok) {
       throw new CliApiError(
@@ -233,16 +265,18 @@ export class HttpApi {
         response.status,
       );
     }
-    return new Uint8Array(await response.arrayBuffer());
+    return new Uint8Array(await this.transport(() => response.arrayBuffer()));
   }
 
   async stream(id: string, onEvent: (event: string, data: string) => void, signal: AbortSignal): Promise<void> {
-    const response = await this.fetch(this.url(`/v1/jobs/${id}/events`), {
-      headers: { authorization: `Bearer ${this.token}`, accept: 'text/event-stream' },
-      signal,
-    });
+    const response = await this.transport(() =>
+      this.fetchImpl(this.url(`/v1/jobs/${id}/events`), {
+        headers: { authorization: `Bearer ${this.token}`, accept: 'text/event-stream' },
+        signal,
+      }),
+    );
     if (!response.ok || !response.body) {
-      const text = await response.text();
+      const text = await this.transport(() => response.text());
       let code = 'BAD_REQUEST';
       let message = response.statusText;
       try {
@@ -258,7 +292,7 @@ export class HttpApi {
     const decoder = new TextDecoder();
     let buf = '';
     while (!signal.aborted) {
-      const chunk = await reader.read();
+      const chunk = await this.transport(() => reader.read());
       if (chunk.done) break;
       buf += decoder.decode(chunk.value, { stream: true });
       let split = buf.indexOf('\n\n');
