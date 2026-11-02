@@ -84,10 +84,9 @@ describe('queue and execution', () => {
     await ctx.daemon?.startProcessing();
     await waitFor(async () => {
       const { json } = await call(ctx, alice.token, 'GET', '/v1/workers');
-      return (json.workers as Json[])[0]?.active === 1;
+      const worker = (json.workers as Json[])[0];
+      return worker?.active === 1 && worker.waiting === 1 && worker.freeSlots === 0;
     });
-    const busy = await call(ctx, alice.token, 'GET', '/v1/workers');
-    expect(busy.json).toMatchObject({ workers: [{ active: 1, waiting: 1, freeSlots: 0 }] });
 
     expect((await waitJob(ctx, alice.token, first.json.job.id as string)).state).toBe('succeeded');
     expect((await waitJob(ctx, alice.token, second.json.job.id as string)).state).toBe('succeeded');

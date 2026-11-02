@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { runCli } from '../src/main';
 import type { CommandResult, RemoteRunner } from '../src/remote';
 
@@ -1299,6 +1299,26 @@ describe('agent-facing cli: each failure has its own exit code', () => {
           expect(code).toBe(21);
         },
       );
+    });
+
+    it('exits 21 when the API takes the request and never answers', async () => {
+      const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(AbortSignal.timeout(5));
+      try {
+        await withProject(
+          () => ({}),
+          async (cli, stdout) => {
+            const stalled = ((_input: string | URL | Request, init?: RequestInit) =>
+              new Promise((_resolve, reject) => {
+                init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+              })) as typeof fetch;
+            const { code, summary } = await exitAndSummary(['workers'], { ...cli, fetchImpl: stalled }, stdout);
+            expect(code).toBe(21);
+            expect(summary.error).toContain('cannot reach the API at http://api.test');
+          },
+        );
+      } finally {
+        timeout.mockRestore();
+      }
     });
   });
 

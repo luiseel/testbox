@@ -264,7 +264,7 @@ export class HttpApi {
   /** The workers and their slots. With a project and a profile, also how long that profile usually runs. */
   workerStatus(query?: { project: string; profile: string }): Promise<WorkerStatus> {
     const params = query ? `?${new URLSearchParams(query).toString()}` : '';
-    return this.request('GET', `/v1/workers${params}`);
+    return this.request('GET', `/v1/workers${params}`, undefined, undefined, AbortSignal.timeout(10_000));
   }
 
   async listArtifacts(id: string): Promise<{ path: string; size: number }[]> {
