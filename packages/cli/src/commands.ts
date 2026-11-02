@@ -8,9 +8,11 @@ import {
   createId,
   ExitCode,
   exitCodeForJob,
+  explainUnsatisfiable,
   fingerprintFromDirectory,
   formatJobSource,
   JOB_SOURCE_MAX_LINKS,
+  labelsSatisfy,
   loadRepoConfig,
   needsDependencyRefresh,
   sessionName,
@@ -212,6 +214,65 @@ export class TestboxApp {
         const links = profile.links.map((link) => ` +${link}`).join('');
         this.io.stdout.write(`${profile.name}${requires}${links}: ${profile.command}\n`);
       }
+      return ExitCode.Pass;
+    } catch (err) {
+      return this.fail(output, err);
+    }
+  }
+
+  /** Show the workers and their free slots, so a caller can decide before it submits a job. */
+  async workers(profileName?: string): Promise<number> {
+    const output = this.out();
+    try {
+      const profile = profileName ? await this.findProfile(profileName, {}) : null;
+      if (typeof profile === 'number') return profile;
+      const project = profile ? (await loadRepoConfig(this.io.cwd)).config.project : null;
+      const user = await this.requireUser(false);
+      if (!user) return ExitCode.Auth;
+      const status = await this.api(user).workerStatus(
+        project && profileName ? { project, profile: profileName } : undefined,
+      );
+      const matching = profile
+        ? status.workers.filter((worker) => labelsSatisfy(worker.labels, profile.requires))
+        : status.workers;
+      const workers = matching.map((worker) => ({
+        id: worker.id,
+        labels: worker.labels,
+        healthy: worker.healthy,
+        capacity: worker.capacity,
+        active: worker.active ?? null,
+        waiting: worker.waiting ?? null,
+        freeSlots: worker.freeSlots ?? null,
+      }));
+      output.event({ type: 'workers', workers });
+      if (!this.json) {
+        if (workers.length === 0) this.io.stdout.write('no workers\n');
+        for (const worker of workers) {
+          const labels = worker.labels.filter((label) => !label.startsWith('worker:')).join(', ');
+          const slots =
+            worker.freeSlots === null ? 'free slots unknown' : `${worker.freeSlots} of ${worker.capacity} slots free`;
+          this.io.stdout.write(`${worker.id} [${labels}]: ${worker.healthy ? slots : 'down'}\n`);
+        }
+      }
+      if (!profile) {
+        output.summary({ ok: true, exitCode: 0, exit: 0 });
+        return ExitCode.Pass;
+      }
+      const healthy = workers.filter((worker) => worker.healthy);
+      if (healthy.length === 0) {
+        const reason = explainUnsatisfiable(profile.requires, status.workers) ?? 'no compatible worker is heartbeating';
+        return this.fail(output, new CliApiError(reason, 'NO_WORKER', 503));
+      }
+      const canStartNow = healthy.some((worker) => worker.freeSlots === null)
+        ? null
+        : healthy.some((worker) => (worker.freeSlots ?? 0) > 0);
+      const typical = status.typicalDurationMs ?? null;
+      if (!this.json) {
+        if (canStartNow === null) output.info('an admin runs testbox admin upgrade to show the free slots');
+        else output.info(canStartNow ? 'a job can start now' : 'all slots are in use: a job waits in the queue');
+        if (typical !== null) output.info(`this profile usually runs for ${Math.round(typical / 1000)} s`);
+      }
+      output.summary({ ok: true, exitCode: 0, exit: 0, canStartNow, typicalDurationMs: typical });
       return ExitCode.Pass;
     } catch (err) {
       return this.fail(output, err);

@@ -1180,6 +1180,127 @@ describe('agent-facing cli: each failure has its own exit code', () => {
     }
   });
 
+  describe('workers', () => {
+    const linux = { id: 'linux-1', labels: ['linux'], healthy: true, capacity: 2, active: 1, waiting: 0, freeSlots: 1 };
+    const mac = { id: 'mac-1', labels: ['macos'], healthy: true, capacity: 1, active: 1, waiting: 0, freeSlots: 0 };
+    const yml =
+      'project: demo\nprofiles:\n  unit:\n    cmd: pnpm test\n    requires: [linux]\n  ios:\n    cmd: xcodebuild test\n    requires: [macos]\n  gpu:\n    cmd: train\n    requires: [gpu]\n';
+
+    async function withProject(
+      answer: (url: URL) => unknown,
+      run: (cli: ReturnType<typeof io>, stdout: string[], stderr: string[]) => Promise<void>,
+    ): Promise<void> {
+      const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
+      const project = await mkdtemp(path.join(os.tmpdir(), 'tb-proj-'));
+      const stdout: string[] = [];
+      const stderr: string[] = [];
+      try {
+        await loggedIn(home);
+        await writeFile(path.join(project, 'testbox.yml'), yml);
+        const api = (async (input: string | URL | Request) =>
+          new Response(JSON.stringify(answer(new URL(String(input)))), { status: 200 })) as typeof fetch;
+        await run(io(home, project, quietRemote, stdout, stderr, api), stdout, stderr);
+      } finally {
+        await rm(home, { recursive: true, force: true });
+        await rm(project, { recursive: true, force: true });
+      }
+    }
+
+    it('lists every worker without --profile, and has no canStartNow', async () => {
+      await withProject(
+        () => ({ workers: [linux, mac], typicalDurationMs: null }),
+        async (cli, stdout) => {
+          const { code, summary } = await exitAndSummary(['workers'], cli, stdout);
+          expect(code).toBe(0);
+          expect(summary).not.toHaveProperty('canStartNow');
+          expect(jsonLines(stdout)[0]).toEqual({ type: 'workers', workers: [linux, mac] });
+        },
+      );
+    });
+
+    it('prints one line for each worker as text', async () => {
+      await withProject(
+        () => ({ workers: [linux, { ...mac, healthy: false }], typicalDurationMs: 90_000 }),
+        async (cli, stdout, stderr) => {
+          expect(await runCli(['workers', '--profile', 'unit'], cli)).toBe(0);
+          expect(stdout.join('')).toBe('linux-1 [linux]: 1 of 2 slots free\n');
+          expect(stderr.join('')).toContain('a job can start now');
+          expect(stderr.join('')).toContain('90 s');
+        },
+      );
+    });
+
+    it('filters by the labels of the profile, and asks for the duration of this project and profile', async () => {
+      const queries: string[] = [];
+      await withProject(
+        (url) => {
+          queries.push(url.search);
+          return { workers: [linux, mac], typicalDurationMs: 60_000 };
+        },
+        async (cli, stdout) => {
+          const free = await exitAndSummary(['workers', '--profile', 'unit'], cli, stdout);
+          expect(free.code).toBe(0);
+          expect(free.summary).toMatchObject({ canStartNow: true, typicalDurationMs: 60_000 });
+          expect(jsonLines(stdout)[0]).toEqual({ type: 'workers', workers: [linux] });
+          expect(queries).toEqual(['?project=demo&profile=unit']);
+
+          const busy = await exitAndSummary(['workers', '--profile', 'ios'], cli, stdout);
+          expect(busy.code).toBe(0);
+          expect(busy.summary).toMatchObject({ canStartNow: false });
+          expect(busy.summary).not.toHaveProperty('hint');
+        },
+      );
+    });
+
+    it('gives null when the API does not send the slots', async () => {
+      const old = { id: 'linux-1', labels: ['linux'], healthy: true, capacity: 2 };
+      await withProject(
+        () => ({ workers: [old] }),
+        async (cli, stdout) => {
+          const { code, summary } = await exitAndSummary(['workers', '--profile', 'unit'], cli, stdout);
+          expect(code).toBe(0);
+          expect(summary).toMatchObject({ canStartNow: null, typicalDurationMs: null });
+          expect(jsonLines(stdout)[0]).toEqual({
+            type: 'workers',
+            workers: [{ ...old, active: null, waiting: null, freeSlots: null }],
+          });
+        },
+      );
+    });
+
+    it('exits 11 when no healthy worker has the labels, and 2 for an unknown profile', async () => {
+      await withProject(
+        () => ({ workers: [linux, { ...mac, healthy: false }] }),
+        async (cli, stdout) => {
+          const noLabel = await exitAndSummary(['workers', '--profile', 'gpu'], cli, stdout);
+          expect(noLabel.code).toBe(11);
+          expect(noLabel.summary.error).toContain('required labels: gpu');
+
+          const down = await exitAndSummary(['workers', '--profile', 'ios'], cli, stdout);
+          expect(down.code).toBe(11);
+          expect(down.summary.error).toContain('no compatible worker is heartbeating');
+
+          const unknown = await exitAndSummary(['workers', '--profile', 'nope'], cli, stdout);
+          expect(unknown.code).toBe(2);
+          expect(unknown.summary.error).toContain('unknown profile nope');
+        },
+      );
+    });
+
+    it('exits 21 when the API does not answer', async () => {
+      await withProject(
+        () => ({}),
+        async (cli, stdout) => {
+          const refused = (async () => {
+            throw new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } });
+          }) as typeof fetch;
+          const { code } = await exitAndSummary(['workers'], { ...cli, fetchImpl: refused }, stdout);
+          expect(code).toBe(21);
+        },
+      );
+    });
+  });
+
   it('exits 20 when the event stream answers 401, even when the job succeeded', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'tb-home-'));
     const stdout: string[] = [];

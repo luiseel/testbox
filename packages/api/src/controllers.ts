@@ -3,11 +3,14 @@ import type { Response } from 'express';
 import { z } from 'zod';
 import {
   AppError,
+  freeSlots,
   isTerminal,
   JOB_SOURCE_MAX_LENGTH,
   JOB_SOURCE_MAX_LINKS,
   JobStore,
   SAFE_SEGMENT,
+  toPlacementWorkers,
+  typicalDurationMs,
   type JobRecord,
 } from '@testbox/shared';
 import { listArtifactFiles, openArtifact, readRequestBody, saveArtifact } from './artifacts';
@@ -363,15 +366,39 @@ export class WorkersController {
   }
 
   @Get()
-  async list() {
+  async list(@Req() req: AuthedRequest, @Query('project') project?: string, @Query('profile') profile?: string) {
     const now = Date.now();
     const workers = await this.store.listWorkers();
+    const jobs = await this.store.listAllJobs();
+    const placement = toPlacementWorkers(workers, jobs);
     return {
-      workers: workers.map((worker) => ({
-        ...worker,
-        healthy: now - worker.lastSeen <= this.options.heartbeatTtlMs,
-      })),
+      workers: workers.map((worker, index) => {
+        const slots = placement[index];
+        return {
+          ...worker,
+          healthy: now - worker.lastSeen <= this.options.heartbeatTtlMs,
+          active: slots?.active ?? 0,
+          waiting: slots?.waiting ?? 0,
+          freeSlots: slots ? Math.max(0, freeSlots(slots)) : 0,
+        };
+      }),
+      typicalDurationMs:
+        project && profile ? await this.typicalDuration(req.principal.id, project, profile, jobs) : null,
     };
+  }
+
+  /** Only the caller's own jobs count: another user's project can have the same name. */
+  private async typicalDuration(
+    ownerId: string,
+    project: string,
+    profile: string,
+    jobs: readonly JobRecord[],
+  ): Promise<number | null> {
+    const workspaces = await this.store.listWorkspaces(ownerId);
+    const ids = new Set(
+      workspaces.filter((workspace) => workspace.project === project).map((workspace) => workspace.id),
+    );
+    return typicalDurationMs(jobs.filter((job) => job.profile === profile && ids.has(job.workspaceId)));
   }
 }
 

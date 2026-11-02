@@ -62,8 +62,26 @@ export function toPlacementWorkers(workers: readonly WorkerRecord[], jobs: reado
 }
 
 /** Slots left after the active jobs and the jobs that wait for this worker. Below 0 when jobs wait. */
-function freeSlots(worker: PlacementWorker): number {
+export function freeSlots(worker: PlacementWorker): number {
   return worker.capacity - worker.active - worker.waiting;
+}
+
+/** How many recent jobs count for typicalDurationMs. */
+const TYPICAL_DURATION_JOBS = 10;
+
+/** The median run time of the last succeeded jobs; null when there is none. Failed jobs can end early, so they do not count. */
+export function typicalDurationMs(jobs: readonly JobRecord[]): number | null {
+  const durations = jobs
+    .filter((job) => job.state === 'succeeded' && job.startedAt !== null && job.endedAt !== null)
+    .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))
+    .slice(0, TYPICAL_DURATION_JOBS)
+    .map((job) => (job.endedAt ?? 0) - (job.startedAt ?? 0))
+    .sort((a, b) => a - b);
+  if (durations.length === 0) return null;
+  const middle = Math.floor(durations.length / 2);
+  return durations.length % 2 === 1
+    ? (durations[middle] ?? null)
+    : Math.round(((durations[middle - 1] ?? 0) + (durations[middle] ?? 0)) / 2);
 }
 
 /** Most free slots first, then the worker that was idle longest, so equal workers take turns. */

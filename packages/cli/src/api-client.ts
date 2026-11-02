@@ -11,6 +11,20 @@ export class CliApiError extends Error {
   }
 }
 
+/** `GET /v1/workers`. An API that is not upgraded does not send the slot counts or the duration. */
+export interface WorkerStatus {
+  workers: {
+    id: string;
+    healthy: boolean;
+    labels: string[];
+    capacity: number;
+    active?: number;
+    waiting?: number;
+    freeSlots?: number;
+  }[];
+  typicalDurationMs?: number | null;
+}
+
 /** True for an abort by the caller (Ctrl-C, detach): not a failure of the API. */
 export function isAbort(err: unknown): boolean {
   return err instanceof Error && err.name === 'AbortError';
@@ -245,6 +259,12 @@ export class HttpApi {
       workers: { id: string; healthy: boolean; labels: string[]; sshHost?: string | null }[];
     }>('GET', '/v1/workers');
     return body.workers;
+  }
+
+  /** The workers and their slots. With a project and a profile, also how long that profile usually runs. */
+  workerStatus(query?: { project: string; profile: string }): Promise<WorkerStatus> {
+    const params = query ? `?${new URLSearchParams(query).toString()}` : '';
+    return this.request('GET', `/v1/workers${params}`);
   }
 
   async listArtifacts(id: string): Promise<{ path: string; size: number }[]> {

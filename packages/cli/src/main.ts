@@ -139,6 +139,14 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
       code = await app.profiles();
     });
 
+  program
+    .command('workers')
+    .description('show the workers and their free slots (--json for a machine-readable list)')
+    .option('--profile <name>', 'only the workers that can run this profile, and if one can start it now')
+    .action(async (opts: { profile?: string }) => {
+      code = await app.workers(opts.profile);
+    });
+
   linkFlag(
     common(
       program
