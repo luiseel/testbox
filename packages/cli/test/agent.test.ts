@@ -1302,14 +1302,17 @@ describe('agent-facing cli: each failure has its own exit code', () => {
     });
 
     it('exits 21 when the API takes the request and never answers', async () => {
-      const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(AbortSignal.timeout(5));
+      const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+      const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => realTimeout(5));
       try {
         await withProject(
           () => ({}),
           async (cli, stdout) => {
             const stalled = ((_input: string | URL | Request, init?: RequestInit) =>
               new Promise((_resolve, reject) => {
-                init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+                const signal = init?.signal;
+                if (signal?.aborted) reject(signal.reason);
+                signal?.addEventListener('abort', () => reject(signal.reason));
               })) as typeof fetch;
             const { code, summary } = await exitAndSummary(['workers'], { ...cli, fetchImpl: stalled }, stdout);
             expect(code).toBe(21);
