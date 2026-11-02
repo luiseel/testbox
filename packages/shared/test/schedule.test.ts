@@ -5,9 +5,9 @@ import {
   explainUnsatisfiable,
   freeSlots,
   labelsSatisfy,
+  medianSucceededDurationMs,
   rankQueuedJobs,
   toPlacementWorkers,
-  typicalDurationMs,
   workerCanRun,
   workerIsHealthy,
   type PlacementWorker,
@@ -155,15 +155,18 @@ describe('scheduler', () => {
   it('takes the median run time of the last 10 succeeded jobs', () => {
     const done = (duration: number, endedAt: number, state = 'succeeded') =>
       ({ state, startedAt: endedAt - duration, endedAt }) as JobRecord;
-    expect(typicalDurationMs([])).toBeNull();
+    expect(medianSucceededDurationMs([])).toBeNull();
     expect(
-      typicalDurationMs([done(5, 100, 'failed'), { state: 'succeeded', startedAt: null, endedAt: 9 } as JobRecord]),
+      medianSucceededDurationMs([
+        done(5, 100, 'failed'),
+        { state: 'succeeded', startedAt: null, endedAt: 9 } as JobRecord,
+      ]),
     ).toBeNull();
-    expect(typicalDurationMs([done(10, 100), done(50, 200), done(20, 300), done(1, 400, 'failed')])).toBe(20);
-    expect(typicalDurationMs([done(10, 100), done(20, 200)])).toBe(15);
+    expect(medianSucceededDurationMs([done(10, 100), done(50, 200), done(20, 300), done(1, 400, 'failed')])).toBe(20);
+    expect(medianSucceededDurationMs([done(10, 100), done(20, 200)])).toBe(15);
     const old = done(100_000, 1);
     const recent = Array.from({ length: 10 }, (_, index) => done(7, 100 + index));
-    expect(typicalDurationMs([old, ...recent])).toBe(7);
+    expect(medianSucceededDurationMs([old, ...recent])).toBe(7);
   });
 
   it('treats a worker seen exactly one heartbeat ttl ago as healthy', () => {

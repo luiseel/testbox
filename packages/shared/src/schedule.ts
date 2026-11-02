@@ -66,15 +66,13 @@ export function freeSlots(worker: PlacementWorker): number {
   return worker.capacity - worker.active - worker.waiting;
 }
 
-/** How many recent jobs count for typicalDurationMs. */
-const TYPICAL_DURATION_JOBS = 10;
+const MEDIAN_DURATION_JOBS = 10;
 
-/** The median run time of the last succeeded jobs; null when there is none. Failed jobs can end early, so they do not count. */
-export function typicalDurationMs(jobs: readonly JobRecord[]): number | null {
+export function medianSucceededDurationMs(jobs: readonly JobRecord[]): number | null {
   const durations = jobs
     .filter((job) => job.state === 'succeeded' && job.startedAt !== null && job.endedAt !== null)
     .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))
-    .slice(0, TYPICAL_DURATION_JOBS)
+    .slice(0, MEDIAN_DURATION_JOBS)
     .map((job) => (job.endedAt ?? 0) - (job.startedAt ?? 0))
     .sort((a, b) => a - b);
   if (durations.length === 0) return null;

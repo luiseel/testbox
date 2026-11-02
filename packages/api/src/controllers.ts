@@ -8,9 +8,9 @@ import {
   JOB_SOURCE_MAX_LENGTH,
   JOB_SOURCE_MAX_LINKS,
   JobStore,
+  medianSucceededDurationMs,
   SAFE_SEGMENT,
   toPlacementWorkers,
-  typicalDurationMs,
   type JobRecord,
 } from '@testbox/shared';
 import { listArtifactFiles, openArtifact, readRequestBody, saveArtifact } from './artifacts';
@@ -383,12 +383,11 @@ export class WorkersController {
         };
       }),
       typicalDurationMs:
-        project && profile ? await this.typicalDuration(req.principal.id, project, profile, jobs) : null,
+        project && profile ? await this.typicalDurationForOwner(req.principal.id, project, profile, jobs) : null,
     };
   }
 
-  /** Only the caller's own jobs count: another user's project can have the same name. */
-  private async typicalDuration(
+  private async typicalDurationForOwner(
     ownerId: string,
     project: string,
     profile: string,
@@ -398,7 +397,7 @@ export class WorkersController {
     const ids = new Set(
       workspaces.filter((workspace) => workspace.project === project).map((workspace) => workspace.id),
     );
-    return typicalDurationMs(jobs.filter((job) => job.profile === profile && ids.has(job.workspaceId)));
+    return medianSucceededDurationMs(jobs.filter((job) => job.profile === profile && ids.has(job.workspaceId)));
   }
 }
 

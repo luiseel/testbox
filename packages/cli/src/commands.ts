@@ -220,30 +220,20 @@ export class TestboxApp {
     }
   }
 
-  /** Show the workers and their free slots, so a caller can decide before it submits a job. */
   async workers(profileName?: string): Promise<number> {
     const output = this.out();
     try {
       const loaded = profileName ? await loadRepoConfig(this.io.cwd) : null;
-      const profile = loaded && profileName ? profileIn(loaded, profileName) : null;
+      const profile = loaded && profileName ? profileOrThrow(loaded, profileName) : null;
       const user = await this.requireUser(false);
       if (!user) return ExitCode.Auth;
       const status = await this.api(user).workerStatus(
         loaded && profileName ? { project: loaded.config.project, profile: profileName } : undefined,
       );
-      const typical = status.typicalDurationMs ?? null;
-      const matching = profile
+      const typical = status.typicalDurationMs;
+      const workers = profile
         ? status.workers.filter((worker) => labelsSatisfy(worker.labels, profile.requires))
         : status.workers;
-      const workers = matching.map((worker) => ({
-        id: worker.id,
-        labels: worker.labels,
-        healthy: worker.healthy,
-        capacity: worker.capacity,
-        active: worker.active ?? null,
-        waiting: worker.waiting ?? null,
-        freeSlots: worker.freeSlots ?? null,
-      }));
       output.event({ type: 'workers', workers });
       if (!this.json) {
         if (workers.length === 0) this.io.stdout.write('no workers\n');
@@ -468,7 +458,7 @@ export class TestboxApp {
   private async findProfile(profileName: string, flags: CommonFlags): Promise<ProfileConfig | number> {
     const output = this.out(flags);
     try {
-      return profileIn(await loadRepoConfig(this.io.cwd), profileName);
+      return profileOrThrow(await loadRepoConfig(this.io.cwd), profileName);
     } catch (err) {
       return this.fail(output, err);
     }
@@ -1063,8 +1053,7 @@ export class TestboxApp {
   }
 }
 
-/** The profile, or a UsageError that names the profiles of testbox.yml. */
-function profileIn(loaded: LoadedConfig, profileName: string): ProfileConfig {
+function profileOrThrow(loaded: LoadedConfig, profileName: string): ProfileConfig {
   const profile = loaded.config.profiles[profileName];
   if (profile) return profile;
   const names = Object.keys(loaded.config.profiles);

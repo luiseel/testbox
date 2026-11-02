@@ -11,18 +11,17 @@ export class CliApiError extends Error {
   }
 }
 
-/** `GET /v1/workers`. An API that is not upgraded does not send the slot counts or the duration. */
 export interface WorkerStatus {
   workers: {
     id: string;
     healthy: boolean;
     labels: string[];
     capacity: number;
-    active?: number;
-    waiting?: number;
-    freeSlots?: number;
+    active: number | null;
+    waiting: number | null;
+    freeSlots: number | null;
   }[];
-  typicalDurationMs?: number | null;
+  typicalDurationMs: number | null;
 }
 
 /** True for an abort by the caller (Ctrl-C, detach): not a failure of the API. */
@@ -261,10 +260,32 @@ export class HttpApi {
     return body.workers;
   }
 
-  /** The workers and their slots. With a project and a profile, also how long that profile usually runs. */
-  workerStatus(query?: { project: string; profile: string }): Promise<WorkerStatus> {
+  async workerStatus(query?: { project: string; profile: string }): Promise<WorkerStatus> {
     const params = query ? `?${new URLSearchParams(query).toString()}` : '';
-    return this.request('GET', `/v1/workers${params}`, undefined, undefined, AbortSignal.timeout(10_000));
+    const body = await this.request<{
+      workers: {
+        id: string;
+        healthy: boolean;
+        labels: string[];
+        capacity: number;
+        active?: number;
+        waiting?: number;
+        freeSlots?: number;
+      }[];
+      typicalDurationMs?: number | null;
+    }>('GET', `/v1/workers${params}`, undefined, undefined, AbortSignal.timeout(10_000));
+    return {
+      workers: body.workers.map((worker) => ({
+        id: worker.id,
+        healthy: worker.healthy,
+        labels: worker.labels,
+        capacity: worker.capacity,
+        active: worker.active ?? null,
+        waiting: worker.waiting ?? null,
+        freeSlots: worker.freeSlots ?? null,
+      })),
+      typicalDurationMs: body.typicalDurationMs ?? null,
+    };
   }
 
   async listArtifacts(id: string): Promise<{ path: string; size: number }[]> {
