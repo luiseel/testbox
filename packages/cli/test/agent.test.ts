@@ -1275,6 +1275,7 @@ describe('agent-facing cli: each failure has its own exit code', () => {
           const noLabel = await exitAndSummary(['workers', '--profile', 'gpu'], cli, stdout);
           expect(noLabel.code).toBe(11);
           expect(noLabel.summary.error).toContain('required labels: gpu');
+          expect(noLabel.summary).toMatchObject({ canStartNow: false, typicalDurationMs: null });
 
           const down = await exitAndSummary(['workers', '--profile', 'ios'], cli, stdout);
           expect(down.code).toBe(11);

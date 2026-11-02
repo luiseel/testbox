@@ -3,6 +3,7 @@ import {
   chooseSyncTarget,
   chooseWorker,
   explainUnsatisfiable,
+  freeSlots,
   labelsSatisfy,
   rankQueuedJobs,
   toPlacementWorkers,
@@ -144,6 +145,11 @@ describe('scheduler', () => {
       },
       { id: 'w2', labels: [], capacity: 1, lastSeen: now - 5, active: 0, waiting: 0, lastJobAt: 0, sshHost: null },
     ]);
+  });
+
+  it('counts free slots after active and waiting jobs, below 0 when jobs wait', () => {
+    expect(freeSlots(worker({ id: 'a', labels: [], capacity: 3, active: 1, waiting: 1 }))).toBe(1);
+    expect(freeSlots(worker({ id: 'a', labels: [], capacity: 1, active: 1, waiting: 1 }))).toBe(-1);
   });
 
   it('takes the median run time of the last 10 succeeded jobs', () => {

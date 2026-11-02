@@ -224,14 +224,14 @@ export class TestboxApp {
   async workers(profileName?: string): Promise<number> {
     const output = this.out();
     try {
-      const profile = profileName ? await this.findProfile(profileName, {}) : null;
-      if (typeof profile === 'number') return profile;
-      const project = profile ? (await loadRepoConfig(this.io.cwd)).config.project : null;
+      const loaded = profileName ? await loadRepoConfig(this.io.cwd) : null;
+      const profile = loaded && profileName ? profileIn(loaded, profileName) : null;
       const user = await this.requireUser(false);
       if (!user) return ExitCode.Auth;
       const status = await this.api(user).workerStatus(
-        project && profileName ? { project, profile: profileName } : undefined,
+        loaded && profileName ? { project: loaded.config.project, profile: profileName } : undefined,
       );
+      const typical = status.typicalDurationMs ?? null;
       const matching = profile
         ? status.workers.filter((worker) => labelsSatisfy(worker.labels, profile.requires))
         : status.workers;
@@ -261,12 +261,19 @@ export class TestboxApp {
       const healthy = workers.filter((worker) => worker.healthy);
       if (healthy.length === 0) {
         const reason = explainUnsatisfiable(profile.requires, status.workers) ?? 'no compatible worker is heartbeating';
-        return this.fail(output, new CliApiError(reason, 'NO_WORKER', 503));
+        output.summary({
+          state: 'error',
+          exitCode: null,
+          error: reason,
+          exit: ExitCode.NoWorker,
+          canStartNow: false,
+          typicalDurationMs: typical,
+        });
+        return ExitCode.NoWorker;
       }
       const canStartNow = healthy.some((worker) => worker.freeSlots === null)
         ? null
         : healthy.some((worker) => (worker.freeSlots ?? 0) > 0);
-      const typical = status.typicalDurationMs ?? null;
       if (!this.json) {
         if (canStartNow === null) output.info('an admin runs testbox admin upgrade to show the free slots');
         else output.info(canStartNow ? 'a job can start now' : 'all slots are in use: a job waits in the queue');
@@ -460,21 +467,11 @@ export class TestboxApp {
   /** The profile from testbox.yml, or the exit code after the failure is printed. */
   private async findProfile(profileName: string, flags: CommonFlags): Promise<ProfileConfig | number> {
     const output = this.out(flags);
-    let loaded;
     try {
-      loaded = await loadRepoConfig(this.io.cwd);
+      return profileIn(await loadRepoConfig(this.io.cwd), profileName);
     } catch (err) {
       return this.fail(output, err);
     }
-    const profile = loaded.config.profiles[profileName];
-    if (!profile) {
-      const names = Object.keys(loaded.config.profiles);
-      const known = names.length
-        ? `the profiles in ${loaded.file} are: ${names.join(', ')}`
-        : `${loaded.file} has no profiles`;
-      return this.fail(output, new UsageError(`unknown profile ${profileName}; ${known}`));
-    }
-    return profile;
   }
 
   async status(jobId: string): Promise<number> {
@@ -1064,6 +1061,17 @@ export class TestboxApp {
     output.failure(message, code);
     return code;
   }
+}
+
+/** The profile, or a UsageError that names the profiles of testbox.yml. */
+function profileIn(loaded: LoadedConfig, profileName: string): ProfileConfig {
+  const profile = loaded.config.profiles[profileName];
+  if (profile) return profile;
+  const names = Object.keys(loaded.config.profiles);
+  const known = names.length
+    ? `the profiles in ${loaded.file} are: ${names.join(', ')}`
+    : `${loaded.file} has no profiles`;
+  throw new UsageError(`unknown profile ${profileName}; ${known}`);
 }
 
 /** The CLI exit code for an error thrown before or outside a job. */
