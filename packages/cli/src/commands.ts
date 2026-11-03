@@ -223,12 +223,12 @@ export class TestboxApp {
   async workers(profileName?: string): Promise<number> {
     const output = this.out();
     try {
-      const loaded = profileName ? await loadRepoConfig(this.io.cwd) : null;
-      const profile = loaded && profileName ? profileOrThrow(loaded, profileName) : null;
+      const loaded = profileName === undefined ? null : await loadRepoConfig(this.io.cwd);
+      const profile = loaded && profileName !== undefined ? profileOrThrow(loaded, profileName) : null;
       const user = await this.requireUser(false);
       if (!user) return ExitCode.Auth;
       const status = await this.api(user).workerStatus(
-        loaded && profileName ? { project: loaded.config.project, profile: profileName } : undefined,
+        loaded && profileName !== undefined ? { project: loaded.config.project, profile: profileName } : undefined,
       );
       const typical = status.typicalDurationMs;
       const workers = profile
@@ -1054,7 +1054,7 @@ export class TestboxApp {
 }
 
 function profileOrThrow(loaded: LoadedConfig, profileName: string): ProfileConfig {
-  const profile = loaded.config.profiles[profileName];
+  const profile = Object.hasOwn(loaded.config.profiles, profileName) ? loaded.config.profiles[profileName] : undefined;
   if (profile) return profile;
   const names = Object.keys(loaded.config.profiles);
   const known = names.length

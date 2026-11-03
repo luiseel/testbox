@@ -1284,6 +1284,19 @@ describe('agent-facing cli: each failure has its own exit code', () => {
           const unknown = await exitAndSummary(['workers', '--profile', 'nope'], cli, stdout);
           expect(unknown.code).toBe(2);
           expect(unknown.summary.error).toContain('unknown profile nope');
+
+          const empty = await exitAndSummary(['workers', '--profile', ''], cli, stdout);
+          expect(empty.code).toBe(2);
+          expect(empty.summary.error).toContain('unknown profile');
+
+          for (const argv of [
+            ['workers', '--profile', 'constructor'],
+            ['verify', 'constructor'],
+          ]) {
+            const inherited = await exitAndSummary(argv, cli, stdout);
+            expect(inherited.code).toBe(2);
+            expect(inherited.summary.error).toContain('unknown profile constructor');
+          }
         },
       );
     });

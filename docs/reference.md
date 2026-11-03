@@ -62,7 +62,7 @@ Every command accepts `--json`. It writes NDJSON to stdout, one event per line, 
 | `log` | `stream` (`stdout` or `stderr`), `line` | One line of the job log. Not printed with `--quiet`. |
 | `check` | `ok`, `label`, `fix` | One `doctor` check. |
 | `profiles` | `file`, `project`, `profiles[]` (`name`, `command`, `requires`, `artifacts`, `links`) | The `profiles` command. |
-| `workers` | `workers[]` (`id`, `labels`, `healthy`, `capacity`, `active`, `waiting`, `freeSlots`) | The `workers` command. `active` counts assigned and running jobs. `waiting` counts queued jobs pinned to the worker. `freeSlots` is `capacity - active - waiting`, never below 0. The last three are `null` when the API is older than the CLI. |
+| `workers` | `workers[]` (`id`, `labels`, `healthy`, `capacity`, `active`, `waiting`, `freeSlots`) | The `workers` command. `active` counts assigned and running jobs. `waiting` counts queued jobs pinned to the worker. `freeSlots` is `capacity - active - waiting`, never below 0. A down worker can still show free slots: read `healthy` too. The last three are `null` when the API is older than the CLI. |
 | `prune` | `name`, `root`, `reason`, `dryRun`, `ok`, `error` | One sync the `prune` command terminated (or would). |
 | `user` | `name`, `apiUrl`, `token` | `admin add-user`. |
 | `summary` | `exit`, `hint`, `exitCode`, `state` (a job state, `error`, or `detached`), `jobId`, `error`, `logFile`, and per command: `ok`, `source` (`status`), `failed` (`doctor`, `prune`), `count` and `dryRun` (`prune`), `file` and `profiles` (`init`), `canStartNow` and `typicalDurationMs` (`workers --profile`) | The last line. |

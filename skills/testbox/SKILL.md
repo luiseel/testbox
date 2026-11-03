@@ -94,7 +94,7 @@ Rules for good profiles:
 ## More
 
 - `testbox doctor`: checks the API, token, Mutagen, stale syncs, workers, and profiles, and prints a fix for each problem.
-- `testbox workers`: lists all workers and their free slots.
+- `testbox workers`: lists all workers and their free slots. A down worker can still show free slots: read `healthy` too, or use `canStartNow`.
 - `testbox prune`: terminates the stale syncs (the checkout is deleted, or no workspace owns the sync). `--dry-run` only prints them.
 - `testbox <command> --help`: every option.
 - Full reference and troubleshooting: https://github.com/luiseel/testbox/tree/master/docs
