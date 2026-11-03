@@ -3,7 +3,9 @@ import {
   chooseSyncTarget,
   chooseWorker,
   explainUnsatisfiable,
+  freeSlots,
   labelsSatisfy,
+  medianSucceededDurationMs,
   rankQueuedJobs,
   toPlacementWorkers,
   workerCanRun,
@@ -143,6 +145,28 @@ describe('scheduler', () => {
       },
       { id: 'w2', labels: [], capacity: 1, lastSeen: now - 5, active: 0, waiting: 0, lastJobAt: 0, sshHost: null },
     ]);
+  });
+
+  it('counts free slots after active and waiting jobs, below 0 when jobs wait', () => {
+    expect(freeSlots(worker({ id: 'a', labels: [], capacity: 3, active: 1, waiting: 1 }))).toBe(1);
+    expect(freeSlots(worker({ id: 'a', labels: [], capacity: 1, active: 1, waiting: 1 }))).toBe(-1);
+  });
+
+  it('takes the median run time of the last 10 succeeded jobs', () => {
+    const done = (duration: number, endedAt: number, state = 'succeeded') =>
+      ({ state, startedAt: endedAt - duration, endedAt }) as JobRecord;
+    expect(medianSucceededDurationMs([])).toBeNull();
+    expect(
+      medianSucceededDurationMs([
+        done(5, 100, 'failed'),
+        { state: 'succeeded', startedAt: null, endedAt: 9 } as JobRecord,
+      ]),
+    ).toBeNull();
+    expect(medianSucceededDurationMs([done(10, 100), done(50, 200), done(20, 300), done(1, 400, 'failed')])).toBe(20);
+    expect(medianSucceededDurationMs([done(10, 100), done(20, 200)])).toBe(15);
+    const old = done(100_000, 1);
+    const recent = Array.from({ length: 10 }, (_, index) => done(7, 100 + index));
+    expect(medianSucceededDurationMs([old, ...recent])).toBe(7);
   });
 
   it('treats a worker seen exactly one heartbeat ttl ago as healthy', () => {

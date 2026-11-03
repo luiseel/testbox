@@ -59,6 +59,48 @@ describe('queue and execution', () => {
     expect(submitted.json.error.code).toBe('NO_WORKER');
   });
 
+  it('reports the slots of a worker, and the typical duration of the caller only', async () => {
+    const ctx = await boot({ capacity: 1 });
+    open.push(ctx);
+    const alice = await user(ctx, 'alice');
+    const bob = await user(ctx, 'bob');
+    const workerId = `worker-${ctx.prefix}`;
+    const ws = await call(ctx, alice.token, 'POST', '/v1/workspaces', { project: 'demo' });
+    const first = await submit(ctx, alice.token, {
+      command: 'sleep 1',
+      profile: 'unit',
+      targetWorkerId: workerId,
+      workspace: { id: ws.json.id as string, stagingRel: ws.json.stagingRel as string },
+    });
+    const second = await submit(ctx, alice.token, { command: 'true', targetWorkerId: workerId });
+    expect([first.status, second.status]).toEqual([201, 201]);
+
+    const queued = await call(ctx, alice.token, 'GET', '/v1/workers');
+    expect(queued.json).toMatchObject({
+      workers: [{ id: workerId, healthy: true, capacity: 1, active: 0, waiting: 2, freeSlots: 0 }],
+      typicalDurationMs: null,
+    });
+
+    await ctx.daemon?.startProcessing();
+    await waitFor(async () => {
+      const { json } = await call(ctx, alice.token, 'GET', '/v1/workers');
+      const worker = (json.workers as Json[])[0];
+      return worker?.active === 1 && worker.waiting === 1 && worker.freeSlots === 0;
+    });
+
+    expect((await waitJob(ctx, alice.token, first.json.job.id as string)).state).toBe('succeeded');
+    expect((await waitJob(ctx, alice.token, second.json.job.id as string)).state).toBe('succeeded');
+
+    const query = '/v1/workers?project=demo&profile=unit';
+    const mine = await call(ctx, alice.token, 'GET', query);
+    expect(mine.json).toMatchObject({ workers: [{ active: 0, waiting: 0, freeSlots: 1 }] });
+    expect(mine.json.typicalDurationMs).toEqual(expect.any(Number));
+    expect((await call(ctx, bob.token, 'GET', query)).json.typicalDurationMs).toBeNull();
+    expect(
+      (await call(ctx, alice.token, 'GET', '/v1/workers?project=demo&profile=other')).json.typicalDurationMs,
+    ).toBeNull();
+  });
+
   it('runs queued jobs in order unless priority or latest-wins applies', async () => {
     const ctx = await boot();
     open.push(ctx);
@@ -801,6 +843,7 @@ async function submit(
     profile?: string;
     priority?: number;
     requires?: string[];
+    targetWorkerId?: string;
     mutateSnapshot?: boolean;
     workspace?: { id: string; stagingRel: string };
     files?: Record<string, string>;
@@ -838,6 +881,7 @@ async function submit(
     profile: opts.profile ?? null,
     priority: opts.priority ?? 0,
     requires: opts.requires,
+    targetWorkerId: opts.targetWorkerId,
     timeoutMs: 20_000,
     source: opts.source,
   });

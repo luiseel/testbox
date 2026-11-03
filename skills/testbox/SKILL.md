@@ -13,6 +13,21 @@ Testbox copies the local tree (uncommitted changes too) to a worker you own, run
 2. No `testbox.yml` (exit 2, `testbox.yml not found`)? If the user wants one, run `testbox init` in the repo root, then edit it (see below).
 3. You do not need `testbox start`. `verify` starts the workspace itself the first time.
 
+## Local or testbox
+
+`testbox workers --profile <name> --json` shows the workers that can run the profile. The summary has `canStartNow` and `typicalDurationMs`. It does not start a job. Use this table:
+
+| Condition | Action |
+| --- | --- |
+| The profile needs something the local machine does not have (for example `linux` or `xcode`) | use testbox |
+| One test or a fast check | run locally |
+| Full suite or long build, and `canStartNow` is `true` | use testbox |
+| Full suite or long build, and `canStartNow` is `false` | run locally if the local machine can run it and takes less time than the wait; each job on the worker takes about `typicalDurationMs`. If not, submit with `--detach` |
+| `canStartNow` is `null` | the slots are not known: the API needs `testbox admin upgrade`. Use testbox, or run locally |
+| Exit 11 or 21 | run locally if the local machine can run it. If not, report the problem and the `testbox doctor` fix |
+
+`typicalDurationMs` is the median of your last 10 succeeded jobs of this project and profile, or `null` when there are none. A `run --profile` job counts too, so one short test can lower it. `canStartNow` is a hint: another job can take the slot first. Then the job stays `queued`, which is safe.
+
 ## Run
 
 ```sh
@@ -79,6 +94,7 @@ Rules for good profiles:
 ## More
 
 - `testbox doctor`: checks the API, token, Mutagen, stale syncs, workers, and profiles, and prints a fix for each problem.
+- `testbox workers`: lists all workers and their free slots. A down worker can still show free slots: read `healthy` too, or use `canStartNow`.
 - `testbox prune`: terminates the stale syncs (the checkout is deleted, or no workspace owns the sync). `--dry-run` only prints them.
 - `testbox <command> --help`: every option.
 - Full reference and troubleshooting: https://github.com/luiseel/testbox/tree/master/docs

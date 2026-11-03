@@ -11,6 +11,19 @@ export class CliApiError extends Error {
   }
 }
 
+export interface WorkerStatus {
+  workers: {
+    id: string;
+    healthy: boolean;
+    labels: string[];
+    capacity: number;
+    active: number | null;
+    waiting: number | null;
+    freeSlots: number | null;
+  }[];
+  typicalDurationMs: number | null;
+}
+
 /** True for an abort by the caller (Ctrl-C, detach): not a failure of the API. */
 export function isAbort(err: unknown): boolean {
   return err instanceof Error && err.name === 'AbortError';
@@ -245,6 +258,34 @@ export class HttpApi {
       workers: { id: string; healthy: boolean; labels: string[]; sshHost?: string | null }[];
     }>('GET', '/v1/workers');
     return body.workers;
+  }
+
+  async workerStatus(query?: { project: string; profile: string }): Promise<WorkerStatus> {
+    const params = query ? `?${new URLSearchParams(query).toString()}` : '';
+    const body = await this.request<{
+      workers: {
+        id: string;
+        healthy: boolean;
+        labels: string[];
+        capacity: number;
+        active?: number;
+        waiting?: number;
+        freeSlots?: number;
+      }[];
+      typicalDurationMs?: number | null;
+    }>('GET', `/v1/workers${params}`, undefined, undefined, AbortSignal.timeout(10_000));
+    return {
+      workers: body.workers.map((worker) => ({
+        id: worker.id,
+        healthy: worker.healthy,
+        labels: worker.labels,
+        capacity: worker.capacity,
+        active: worker.active ?? null,
+        waiting: worker.waiting ?? null,
+        freeSlots: worker.freeSlots ?? null,
+      })),
+      typicalDurationMs: body.typicalDurationMs ?? null,
+    };
   }
 
   async listArtifacts(id: string): Promise<{ path: string; size: number }[]> {
